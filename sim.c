@@ -99,7 +99,7 @@ void MUL(int fields[]){
 
 void LDURx(int nbits, int fields[]){
 
-	uint64_t start_addr = fields[3] + fields[1];
+	uint64_t start_addr = fields[3] + uint64_t(fields[1]);
 	if(nbits == 64){
 		uint64_t lower32 = (uint64_t)mem_read_32(start_addr);
 		uint64_t upper32 = (uint64_t)mem_read_32(start_addr + 32);
@@ -116,11 +116,75 @@ void LDURx(int nbits, int fields[]){
 
 }
 
+void CBNZ(int fields[]){
+
+	// need to shift address to be 64 bits
+	// left extend by 43, bottom 2 bits 0
+	// could also call B
+
+	if(CURRENT_STATE.REGS[fields[2]] != CURRENT_STATES.REGS[31]) {
+		NEXT_STATE.PC = CURRENT_STATE.PC + addr;
+	}
+	else {
+		NEXT_STATE.PC = CURRENT_STATE.PC + 4;
+	}
+
+}
+
+void CBZ(int fields[]){
+
+	// need to shift address to be 64 bits
+	// left extend by 43, bottom 2 bits 0
+	// could also call B
+
+	if(CURRENT_STATE.REGS[fields[2]] == CURRENT_STATE.REGS[31]) {
+		NEXT_STATE.PC = CURRENT_STATE.PC + addr;
+	}
+	else {
+		NEXT_STATE.PC = CURRENT_STATE.PC + 4;
+	}
+
+}
+
+void LSx(int fields[]){
+
+	val = uint64_t(CURRENT_STATE.REGS[fields[3]]);
+
+	if(fields[2] == 0x3F){
+		NEXT_STATE.REGS[fields[4]] = val << fields[2];
+	}
+	else {
+		NEXT_STATE.REGS[fields[4]] = val >> fields[2];
+	}
+
+}
+
+void MOVZ(int fields[]){
+
+	uint64_t val = (uint64_t) fields[2];
+
+	// no action required if fields[1] == 0
+	if(fields[1] == 1) {
+		val <<= 16;
+	}
+	else if(fields[1] == 2){
+		val <<= 32;
+	}
+	else if(fields[1] == 3){
+		val <<= 48;
+	}
+
+	printf("MOVZ val %ld", val);
+	NEXT_STATE.REGS[fields[3]] = val;
+
+}
+
+
 // Branching functions
 
 void BR(int fields[]){
 
-	//B(CURRENT_STATE.REGS[fields[3]]);
+	NEXT_STATE.PC = CURRENT_STATE.REGS[fields[3]];
 
 }
 
