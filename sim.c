@@ -13,8 +13,8 @@ uint32_t fetch(uint64_t PC)
 // Function implementations
 
 void ADDx(char instr_type, int set_flag, int fields[]){
-	
-	int64_t temp;	
+
+	int64_t temp;
 
 	if(instr_type == 'R'){
 		temp = CURRENT_STATE.REGS[fields[1]] + CURRENT_STATE.REGS[fields[3]];
@@ -36,12 +36,12 @@ void ADDx(char instr_type, int set_flag, int fields[]){
                 else
                         NEXT_STATE.FLAG_Z = 0;
 	}
-		
+
 }
 
 void SUBx(char instr_type, int set_flag, int fields[]){
 
-	int64_t temp;	
+	int64_t temp;
 
 	if(instr_type == 'R'){
 		printf("%ld - %ld", CURRENT_STATE.REGS[fields[3]], CURRENT_STATE.REGS[fields[1]]);
@@ -85,7 +85,7 @@ void ANDx(int set_flag, int fields[]) {
 			NEXT_STATE.FLAG_Z = 1;
 		else
 			NEXT_STATE.FLAG_Z = 0;
-	}			
+	}
 }
 
 void MUL(int fields[]){
@@ -102,18 +102,36 @@ void LDURx(int nbits, int fields[]){
 	uint64_t start_addr = fields[3] + fields[1];
 	if(nbits == 64){
 		uint64_t lower32 = (uint64_t)mem_read_32(start_addr);
+		//should this be not 32, but 4?)
 		uint64_t upper32 = (uint64_t)mem_read_32(start_addr + 32);
 		NEXT_STATE.REGS[fields[4]] = (upper32 << 32) + lower32;
 	}
 	else if(nbits == 16){
 		uint64_t val = (uint64_t)mem_read_32(start_addr);
+			//should we add preceding zeros to be safe? do we even need to?
       NEXT_STATE.REGS[fields[4]] = val & 0xFFFF; // gets bottom 16 bits
 	}
 	else { // nbits = 8
 		uint64_t val = (uint64_t)mem_read_32(start_addr);
-		NEXT_STATE.REGS[fields[4]] = val & 0xFF; // gets bottom 8 bits	
+		NEXT_STATE.REGS[fields[4]] = val & 0xFF; // gets bottom 8 bits
 	}
 
+}
+
+void STURx(int nbits, int fields[]){
+	uint64_t start_addr = fields[3] + fields[1];
+	if(nbits == 64){
+		uint64_t start_addr = fields[3] + fields[1];
+		int64_t val = CURRENT_STATE.REGS[fields[4]];
+		mem_write_32(start_addr, (uint32_t)((val >> 32) & 0x0000FFFF));
+		mem_write_32(start_addr + 4, (uint32_t)(val & 0x0000FFFF));
+	}
+	if(nbits == 16){
+		//uint64_t start_addr = fields[3] + fields[1];
+		//int64_t val = CURRENT_STATE.REGS[fields[4]];
+		//mem_write_32(start_addr, (uint32_t)((val >> 32) & 0x0000FFFF));
+		//mem_write_32(start_addr + 4, (uint32_t)(val & 0x0000FFFF));
+	}
 }
 
 // Branching functions
@@ -138,44 +156,44 @@ void execute(char inst_type, int fields[])
 
             	case 0x458: { // ADD
             	   	ADDx('R', 0, fields);
-				} break;
+								} break;
                	case 0x558: { // ADDS
-					printf("ADDS ... \n");
-					ADDx('R', 1, fields);
-				} break;
+									printf("ADDS ... \n");
+									ADDx('R', 1, fields);
+								} break;
                	case 0x450: { // AND
-                	ANDx(0, fields);	
-				} break;
+                	ANDx(0, fields);
+								} break;
                	case 0x750: { // ANDS
-			ANDx(1, fields);
+									ANDx(1, fields);
                 } break;
                	case 0x650: { // EOR
                 } break;
                	case 0x550: { // ORR
                 } break;
                	case 0x658: { // SUB
-			SUBx('R', 0, fields);
+									SUBx('R', 0, fields);
                 } break;
-		case 0x758: { // SUBS
-			printf("SUBS ... \n");
-			SUBx('R', 1, fields);
-		} break;
+								case 0x758: { // SUBS
+									printf("SUBS ... \n");
+									SUBx('R', 1, fields);
+								} break;
                	case 0x4D8: { // MUL
-			MUL(fields);
+									MUL(fields);
                 } break;
-		case 0x6b0: { // BR
-			BR(fields);
-		} break;
-        	}
+								case 0x6b0: { // BR
+									BR(fields);
+								} break;
+			}
 
 			NEXT_STATE.PC = CURRENT_STATE.PC + 4;
- 
+
 		} break;
 		case 'I': {
 			printf("case I\n");
 			switch(fields[0]) {
-		
-				case 0x244: // ADDI 
+
+				case 0x244: // ADDI
 				case 0x489: { // ADDI
 					ADDx('I', 0, fields);
 				} break;
@@ -191,15 +209,15 @@ void execute(char inst_type, int fields[])
 				case 0x788: // SUBIS
 				case 0x789: { // SUBIS
 					SUBx('I', 1, fields);
-				} break; 
+				} break;
 			}
 
-			NEXT_STATE.PC = CURRENT_STATE.PC + 4;		
+			NEXT_STATE.PC = CURRENT_STATE.PC + 4;
 		} break;
 		case 'D': {
 			printf("case D\n");
 			switch(fields[0]) {
-			
+
 				case 0x7C0: { // STUR
 					//STURx(64, fields);
 				} break;
@@ -217,12 +235,12 @@ void execute(char inst_type, int fields[])
 				case 0x1C2: // LDURB
 					LDURx(8, fields);
 				} break;
-				
-			} 
-		
+
+			}
+
 			NEXT_STATE.PC = CURRENT_STATE.PC + 4;
 		} break;
-	
+
 	}
 
 	return;
@@ -248,7 +266,7 @@ void R_decoder(int instruct_no)
 	int opcode = instruct_no & 0x000007FF;
 
 	int fields[] = {opcode, Rm, shamt, Rn, Rd};
-	
+
 	int i;
 	for(i = 0; i < 5; i++){
 		printf("%08x \n", fields[i]);
@@ -272,10 +290,10 @@ void I_decoder(int instruct_no)
 
 	int fields[] = {opcode, immediate, Rn, Rd};
 
-	int i;	
+	int i;
 	for(i = 0; i < 4; i++){
          printf("%08x \n", fields[i]);
-     }	
+     }
 
 	execute('I', fields);
 
@@ -322,7 +340,7 @@ void decode(int instruct_no)
 	//Branches, Exception Generating and System Instructions
 	if(first_3 == 5){
 		//B_decoder(instruct_no);
-		
+
 	}
 	//Data Processing -- Immediate
 	else if(first_3 == 4){
