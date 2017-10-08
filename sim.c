@@ -95,6 +95,7 @@ void MUL(int fields[]){
 	printf("temp %ld", temp);
 	NEXT_STATE.REGS[fields[4]] = temp;
 
+
 }
 
 void LDURx(int nbits, int fields[]){
@@ -108,7 +109,6 @@ void LDURx(int nbits, int fields[]){
 	}
 	else if(nbits == 16){
 		uint64_t val = (uint64_t)mem_read_32(start_addr);
-			//should we add preceding zeros to be safe? do we even need to?
       NEXT_STATE.REGS[fields[4]] = val & 0xFFFF; // gets bottom 16 bits
 	}
 	else { // nbits = 8
@@ -118,11 +118,42 @@ void LDURx(int nbits, int fields[]){
 
 }
 
+void STURx(int nbits, int fields[]){
+	uint64_t start_addr = fields[3] + fields[1];
+	int64_t val = CURRENT_STATE.REGS[fields[4]];
+	if(nbits == 64){
+		mem_write_32(start_addr, (uint32_t)(val & 0x0000FFFF));
+		mem_write_32(start_addr+4, (uint32_t)((val >> 32) & 0x0000FFFF));
+	}
+	if(nbits == 16){
+		uint32_t mem = mem_read_32(start_addr);
+		int mask_16 = 0xFFFF << 16;
+		mem = mem & mask_16;
+
+		uint32_t val2 = (uint32_t)val) & 0xFFFF;
+		mem = mem + val2;
+
+		mem_write_32(start_addr, mem);
+	}
+	if(nbits == 8){
+		uint32_t mem = mem_read_32(start_addr);
+		int mask_24 = 0xFFFFFF << 8;
+		mem = mem & mask_24;
+
+		uint32_t val2 = (uint32_t)val) & 0xFF;
+		mem = mem + val2;
+
+		mem_write_32(start_addr, mem);
+	}
+}
+
 void CBNZ(int fields[]){
 
 	// need to shift address to be 64 bits
 	// left extend by 43, bottom 2 bits 0
 	// could also call B
+
+	uint64_t addr = ((uint64_t)fields[1]) << 2;
 
 	if(CURRENT_STATE.REGS[fields[2]] != CURRENT_STATES.REGS[31]) {
 		NEXT_STATE.PC = CURRENT_STATE.PC + addr;
@@ -138,6 +169,7 @@ void CBZ(int fields[]){
 	// need to shift address to be 64 bits
 	// left extend by 43, bottom 2 bits 0
 	// could also call B
+	uint64_t addr = ((uint64_t)fields[1]) << 2;
 
 	if(CURRENT_STATE.REGS[fields[2]] == CURRENT_STATE.REGS[31]) {
 		NEXT_STATE.PC = CURRENT_STATE.PC + addr;
@@ -148,22 +180,76 @@ void CBZ(int fields[]){
 
 }
 
+void BR(int fields[]){
+
+	NEXT_STATE.PC = CURRENT_STATE.REGS[fields[3]];
+
+}
+
+void BRANCH_IMM(int fields[]){
+	uint64_t addr = ((uint64_t)fields[1]) << 2;
+	NEXT_STATE.PC = CURRENT_STATE.PC + addr;
+}
+
+// Branching functions
+
+void B_COND(int fields[]){
+
+	uint64_t addr = ((uint64_t)fields[1]) << 2;
+
+	int cond = fields[2] & 0x0000000F;
+	int branch = 0;
+
+	switch (cond) {
+		case 0x00000000: { //equal
+			//if Z = 1,
+			if(CURRENT_STATE.FLAG_Z == 1)
+				branch = 1;
+		} break;
+		case 0x00000001: { // not equal
+			if( CURRENT_STATE.FLAG_Z == 0)
+				branch = 1;
+		} break;
+		case 0x0000000A: { // greater than or equal
+			if(CURRENT_STATE.FLAG_N == 0)
+				branch = 1;
+		} break;
+		case 0x0000000B: { // less than
+			if(CURRENT_STATE.FLAG_N == 1)
+				branch = 1;
+		} break;
+		case 0x0000000C: {//greater than
+			if(CURRENT_STATE.FLAG_Z == 0 && CURRENT_STATE.FLAG_N == 0)
+				branch = 1;
+		} break;
+		case 0x0000000D: {//less than or equal to
+			if(!(CURRENT_STATE.FLAG_Z == 0 && CURRENT_STATE.FLAG_N == 0))
+				branch = 1;
+		} break;
+	}
+
+	if(branch)
+		NEXT_STATE.PC = CURRENT_STATE.PC + addr;
+	else
+		NEXT_STATE.PC = CURRENT_STATE.PC + 4;
+}
+
 void LSx(int fields[]){
 
-	val = uint64_t(CURRENT_STATE.REGS[fields[3]]);
+	uint64_t val = (uint64_t)CURRENT_STATE.REGS[fields[3]];
 
 	if(fields[2] == 0x3F){
-		NEXT_STATE.REGS[fields[4]] = val << fields[2];
+		NEXT_STATE.REGS[fields[4]] = val >> fields[2];
 	}
 	else {
-		NEXT_STATE.REGS[fields[4]] = val >> fields[2];
+		NEXT_STATE.REGS[fields[4]] = val << fields[2];
 	}
 
 }
 
 void MOVZ(int fields[]){
 
-	uint64_t val = (uint64_t) fields[2];
+	uint64_t val = (uint64_t)fields[2];
 
 	// no action required if fields[1] == 0
 	if(fields[1] == 1) {
@@ -177,38 +263,11 @@ void MOVZ(int fields[]){
 	}
 
 	printf("MOVZ val %ld", val);
-	NEXT_STATE.REGS[fields[3]] = val;
-
+	NEXT_STATE.REGS[fields[3]] = (int64_t)val;
 }
-
-void STURx(int nbits, int fields[]){
-	uint64_t start_addr = fields[3] + fields[1];
-	if(nbits == 64){
-		uint64_t start_addr = fields[3] + fields[1];
-		int64_t val = CURRENT_STATE.REGS[fields[4]];
-		mem_write_32(start_addr, (uint32_t)((val >> 32) & 0x0000FFFF));
-		mem_write_32(start_addr + 4, (uint32_t)(val & 0x0000FFFF));
-	}
-	if(nbits == 16){
-		//uint64_t start_addr = fields[3] + fields[1];
-		//int64_t val = CURRENT_STATE.REGS[fields[4]];
-		//mem_write_32(start_addr, (uint32_t)((val >> 32) & 0x0000FFFF));
-		//mem_write_32(start_addr + 4, (uint32_t)(val & 0x0000FFFF));
-	}
-}
-
-// Branching functions
-
-void BR(int fields[]){
-
-	NEXT_STATE.PC = CURRENT_STATE.REGS[fields[3]];
-
-}
-
 
 
 // Execution implementation
-
 void execute(char inst_type, int fields[])
 {
 	switch (inst_type){
@@ -244,8 +303,11 @@ void execute(char inst_type, int fields[])
                	case 0x4D8: { // MUL
 									MUL(fields);
                 } break;
-								case 0x6b0: { // BR
+								case 0x6B0: { // BR
 									BR(fields);
+								} break;
+								case 0x34D: {
+									LSx(fields);
 								} break;
 			}
 
@@ -273,6 +335,10 @@ void execute(char inst_type, int fields[])
 				case 0x789: { // SUBIS
 					SUBx('I', 1, fields);
 				} break;
+				case 0x000001A5: {//MOVZ
+					MOVZ(fields);
+				} break;
+
 			}
 
 			NEXT_STATE.PC = CURRENT_STATE.PC + 4;
@@ -303,6 +369,23 @@ void execute(char inst_type, int fields[])
 
 			NEXT_STATE.PC = CURRENT_STATE.PC + 4;
 		} break;
+		case 'C': {
+			switch (fields[0]) {
+				case 0xB5: { //CBNZ
+					//call function
+				} break;
+				case 0xB4: { //CBZ
+					//call function
+				} break;
+				case 0x54: { //b.cond
+					//call function
+				} break;
+			}
+		}
+		case 'B': {
+			//call function (immediate branching)
+			BRANCH_IMM(fields);
+		} break;
 
 	}
 
@@ -328,6 +411,10 @@ void R_decoder(int instruct_no)
 	instruct_no >>= 5;
 	int opcode = instruct_no & 0x000007FF;
 
+	//special case for LSx
+	if (((unsigned)opcode) >> 1 == 0x0000034D)
+		opcode = 0x0000034D;
+
 	int fields[] = {opcode, Rm, shamt, Rn, Rd};
 
 	int i;
@@ -343,24 +430,36 @@ void I_decoder(int instruct_no)
 
 	int five_bit_mask = 0x0000001F;
 
-	int Rd = instruct_no & five_bit_mask;
-	instruct_no >>= 5;
-	int Rn = instruct_no & five_bit_mask;
-	instruct_no >>= 5;
-	int64_t immediate = instruct_no & 0x00000FFF;
-	instruct_no >>= 12;
-	int opcode = instruct_no & 0x000003FF;
+	//special case for MOVZ
+	if((unsigned)instruct_no >> 23 == 0x000001A5){
+		int Rd = instruct_no & five_bit_mask;
+		instruct_no >>= 5;
+		int imm = instruct_no & 0x0000FFFF;
+		instruct_no >>= 16;
+		int op2 = instruct_no & 0x00000003;
+		instruct_no >>= 2;
+		int opcode = instruct_no & 0x000001FF;
 
-	int fields[] = {opcode, immediate, Rn, Rd};
+		int fields[] = {opcode, op2, imm, Rd};
+	}
+	else{
+		int Rd = instruct_no & five_bit_mask;
+		instruct_no >>= 5;
+		int Rn = instruct_no & five_bit_mask;
+		instruct_no >>= 5;
+		int64_t immediate = instruct_no & 0x00000FFF;
+		instruct_no >>= 12;
+		int opcode = instruct_no & 0x000003FF;
 
-	int i;
-	for(i = 0; i < 4; i++){
-         printf("%08x \n", fields[i]);
-     }
+		int fields[] = {opcode, immediate, Rn, Rd};
+
+		//int i;
+		//for(i = 0; i < 4; i++){
+    //     	printf("%08x \n", fields[i]);
+     //	}
+	}
 
 	execute('I', fields);
-
-
 }
 
 void D_decoder(int instruct_no)
@@ -383,9 +482,35 @@ void D_decoder(int instruct_no)
 
 }
 
+void B_decoder(int instruct_no){
+	//conditional branching
+	if((((unsigned) instruct_no) >> 24) == 0x00000054){
+		int Rt = instruct_no & 0x0000001F;
+		instruct_no >>= 5;
+		int br_addr = instruct_no & 0x0007FFFF;
+		//br_addr = (br_addr << 2);
+		instruct_no >>= 19;
+		int opcode = instruct_no & 0x000000FF;
+
+		int fields[] = {opcode, br_addr, Rt};
+
+		execute('C', fields);
+	}
+	//nonconditional Branching
+	else{
+		int br_addr = instruct_no & 0x03FFFFFF;
+		int opcode = ((unsigned)instruct_no) >> 26;
+
+		int fields[] = {opcode, br_addr};
+
+		execute('B', fields);
+	}
+}
+
 void decode(int instruct_no)
 {
 
+	//unique commands
 	if(instruct_no == 0xd4400000){
 		printf("HLT command detected");
 		RUN_BIT = 0;
@@ -402,7 +527,7 @@ void decode(int instruct_no)
 
 	//Branches, Exception Generating and System Instructions
 	if(first_3 == 5){
-		//B_decoder(instruct_no);
+		B_decoder(instruct_no);
 
 	}
 	//Data Processing -- Immediate
