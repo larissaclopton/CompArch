@@ -3,17 +3,17 @@
 
 #define ARM_REGS 32
 
-unsigned int fetch(uint64_t PC)
+uint32_t fetch(uint64_t PC)
 {
-	int temp = mem_read_32(PC);
+	uint32_t temp = mem_read_32(PC);
 	printf("%08x \n", temp);
 	return temp;
 }
 
+// Function implementations
 
-
-
-int ADDx(char instr_type, int set_flag, int *fields){
+void ADDx(char instr_type, int set_flag, int fields[]){
+	
 	int64_t temp;	
 
 	if(instr_type == 'R'){
@@ -27,33 +27,106 @@ int ADDx(char instr_type, int set_flag, int *fields){
 
 	if(set_flag){
 		if(temp < CURRENT_STATE.REGS[31])
-			NEXT_STATE.FLAG_N = 1;
-		else if(temp == CURRENT_STATE.REGS[31])
-			NEXT_STATE.FLAG_Z = 0;
+                        NEXT_STATE.FLAG_N = 1;
+                else
+                        NEXT_STATE.FLAG_N = 0;
+
+                if(temp == CURRENT_STATE.REGS[31])
+                        NEXT_STATE.FLAG_Z = 1;
+                else
+                        NEXT_STATE.FLAG_Z = 0;
 	}
 		
 }
 
-int SUBx(char instr_type, int set_flag, int *fields){
+void SUBx(char instr_type, int set_flag, int fields[]){
+
 	int64_t temp;	
 
 	if(instr_type == 'R'){
-		temp = CURRENT_STATE.REGS[fields[3]] - CURRENT_STATE.REGS[fields[1]];
+		printf("%ld - %ld", CURRENT_STATE.REGS[fields[3]], CURRENT_STATE.REGS[fields[1]]);
+		temp = (int64_t)CURRENT_STATE.REGS[fields[3]] - (int64_t)CURRENT_STATE.REGS[fields[1]];
 		NEXT_STATE.REGS[fields[4]] = temp;
 	}
 	else{
-		temp = CURRENT_STATE.REGS[fields[2]] - fields[1];
-		NEXT_STATE.REGS[fields[3]];
+		printf("%ld - % ld", (int64_t)CURRENT_STATE.REGS[fields[2]], (int64_t)fields[1]);
+		temp = (int64_t)CURRENT_STATE.REGS[fields[2]] - (int64_t)fields[1];
+		NEXT_STATE.REGS[fields[3]] = temp;
 	}
+
+	printf("temp %ld", temp);
+
+	if(set_flag){
+		if(temp < CURRENT_STATE.REGS[31])
+                        NEXT_STATE.FLAG_N = 1;
+                else
+                        NEXT_STATE.FLAG_N = 0;
+
+                if(temp == CURRENT_STATE.REGS[31])
+                        NEXT_STATE.FLAG_Z = 1;
+                else
+                        NEXT_STATE.FLAG_Z = 0;
+	}
+
+}
+
+void ANDx(int set_flag, int fields[]) {
+
+	int64_t temp = CURRENT_STATE.REGS[fields[3]] & CURRENT_STATE.REGS[fields[1]];
+	NEXT_STATE.REGS[fields[4]] = temp;
 
 	if(set_flag){
 		if(temp < CURRENT_STATE.REGS[31])
 			NEXT_STATE.FLAG_N = 1;
-		else if(temp == CURRENT_STATE.REGS[31])
+		else
+			NEXT_STATE.FLAG_N = 0;
+
+		if(temp == CURRENT_STATE.REGS[31])
+			NEXT_STATE.FLAG_Z = 1;
+		else
 			NEXT_STATE.FLAG_Z = 0;
-	}
+	}			
 }
 
+void MUL(int fields[]){
+
+	int64_t temp;
+	temp = (CURRENT_STATE.REGS[fields[3]] * CURRENT_STATE.REGS[fields[1]]);
+	printf("temp %ld", temp);
+	NEXT_STATE.REGS[fields[4]] = temp;
+
+}
+
+void LDURx(int nbits, int fields[]){
+
+	uint64_t start_addr = fields[3] + fields[1];
+	if(nbits == 64){
+		uint64_t lower32 = (uint64_t)mem_read_32(start_addr);
+		uint64_t upper32 = (uint64_t)mem_read_32(start_addr + 32);
+		NEXT_STATE.REGS[fields[4]] = (upper32 << 32) + lower32;
+	}
+	else if(nbits == 16){
+		uint64_t val = (uint64_t)mem_read_32(start_addr);
+      NEXT_STATE.REGS[fields[4]] = val & 0xFFFF; // gets bottom 16 bits
+	}
+	else { // nbits = 8
+		uint64_t val = (uint64_t)mem_read_32(start_addr);
+		NEXT_STATE.REGS[fields[4]] = val & 0xFF; // gets bottom 8 bits	
+	}
+
+}
+
+// Branching functions
+
+void BR(int fields[]){
+
+	//B(CURRENT_STATE.REGS[fields[3]]);
+
+}
+
+
+
+// Execution implementation
 
 void execute(char inst_type, int fields[])
 {
@@ -63,56 +136,91 @@ void execute(char inst_type, int fields[])
 			printf("case R\n");
 			switch(fields[0]) {
 
-            	case 0x00000458: { // ADD
+            	case 0x458: { // ADD
             	   	ADDx('R', 0, fields);
 				} break;
-               	case 0x00000558: { // ADDS
+               	case 0x558: { // ADDS
 					printf("ADDS ... \n");
 					ADDx('R', 1, fields);
 				} break;
-               	case 0x00000450: { // AND
-                
+               	case 0x450: { // AND
+                	ANDx(0, fields);	
 				} break;
-               	case 0x00000750: { // ANDS
+               	case 0x750: { // ANDS
+			ANDx(1, fields);
                 } break;
-               	case 0x00000650: { // EOR
+               	case 0x650: { // EOR
                 } break;
-               	case 0x00000550: { // ORR
+               	case 0x550: { // ORR
                 } break;
-               	case 0x00000658: { // SUB
+               	case 0x658: { // SUB
+			SUBx('R', 0, fields);
                 } break;
-				case 0x00000758: { // SUBS
-				} break;
-               	case 0x000004D8: { // MUL
+		case 0x758: { // SUBS
+			printf("SUBS ... \n");
+			SUBx('R', 1, fields);
+		} break;
+               	case 0x4D8: { // MUL
+			MUL(fields);
                 } break;
+		case 0x6b0: { // BR
+			BR(fields);
+		} break;
         	}
 
 			NEXT_STATE.PC = CURRENT_STATE.PC + 4;
  
 		} break;
 		case 'I': {
+			printf("case I\n");
 			switch(fields[0]) {
 		
-				case 0x00000488: // ADDI 
-				case 0x00000489: { // ADDI
+				case 0x244: // ADDI 
+				case 0x489: { // ADDI
+					ADDx('I', 0, fields);
 				} break;
-				case 0x000002c4: // ADDIS ... I'm confused on how to handle the range here...
-				case 0x00000589: { // ADDIS ... 589 shifted all the way right becomes 2c4 as well?
+				case 0x2c4: // ADDIS ... I'm confused on how to handle the range here...
+				case 0x589: { // ADDIS ... 589 shifted all the way right becomes 2c4 as well?
 					printf("ADDIS ... \n");
 					ADDx('I', 1, fields);
 				} break;
-				case 0x00000688: // SUBI
-				case 0x00000689: { // SUBI
+				case 0x3c4: // SUBI
+				case 0x689: { // SUBI
+					SUBx('I', 0, fields);
 				} break;
-				case 0x00000788: // SUBIS
-				case 0x00000789: { // SUBIS
+				case 0x788: // SUBIS
+				case 0x789: { // SUBIS
+					SUBx('I', 1, fields);
 				} break; 
 			}
 
 			NEXT_STATE.PC = CURRENT_STATE.PC + 4;		
 		} break;
 		case 'D': {
-
+			printf("case D\n");
+			switch(fields[0]) {
+			
+				case 0x7C0: { // STUR
+					//STURx(64, fields);
+				} break;
+				case 0x3C0: { // STURH
+					//STURx(16, fields);
+				} break;
+				case 0x1C0: { // STURB
+					//STURx(8, fields);
+				case 0x7C2: { // LDUR
+					LDURx(64, fields);
+				} break;
+				case 0x3C2: { // LDURH
+					LDURx(16, fields);
+				} break;
+				case 0x1C2: // LDURB
+					LDURx(8, fields);
+				} break;
+				
+			} 
+		
+			NEXT_STATE.PC = CURRENT_STATE.PC + 4;
 		} break;
 	
 	}
@@ -121,7 +229,7 @@ void execute(char inst_type, int fields[])
 }
 
 
-
+// Decoders for each function type
 
 void R_decoder(int instruct_no)
 {
@@ -158,7 +266,7 @@ void I_decoder(int instruct_no)
 	instruct_no >>= 5;
 	int Rn = instruct_no & five_bit_mask;
 	instruct_no >>= 5;
-	int immediate = instruct_no & 0x00000FFF;
+	int64_t immediate = instruct_no & 0x00000FFF;
 	instruct_no >>= 12;
 	int opcode = instruct_no & 0x000003FF;
 
@@ -184,16 +292,15 @@ void D_decoder(int instruct_no)
 	instruct_no >>= 5;
 	int op2 = instruct_no & 0x00000003;
 	instruct_no >>= 2;
-	int address = instruct_no & 0x000001FF;
+	int offset = instruct_no & 0x000001FF;
 	instruct_no >>= 9;
 	int opcode = instruct_no & 0x000007FF;
 
-	int fields[] = {opcode, address, op2, Rn, Rt};
+	int fields[] = {opcode, offset, op2, Rn, Rt};
 
 	execute('D', fields);
 
 }
-
 
 void decode(int instruct_no)
 {
@@ -235,7 +342,7 @@ void decode(int instruct_no)
 	}
 	//Loads and Stores
 	else{
-		//D_decoder(instruct_no);
+		D_decoder(instruct_no);
 	}
 }
 
