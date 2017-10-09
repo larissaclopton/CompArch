@@ -45,7 +45,7 @@ void SUBx(char instr_type, int set_flag, int fields[]){
 
 	if(instr_type == 'R'){
 		printf("%ld - %ld", CURRENT_STATE.REGS[fields[3]], CURRENT_STATE.REGS[fields[1]]);
-		temp = (int64_t)CURRENT_STATE.REGS[fields[3]] - (int64_t)CURRENT_STATE.REGS[fields[1]];
+		temp = CURRENT_STATE.REGS[fields[3]] - CURRENT_STATE.REGS[fields[1]];
 		NEXT_STATE.REGS[fields[4]] = temp;
 	}
 	else{
@@ -388,7 +388,7 @@ void execute(char inst_type, int fields[])
 					CBZ(fields);
 				} break;
 				case 0x54: { //b.cond
-					//call function
+					B_COND(fields);
 				} break;
 			}
 		}
