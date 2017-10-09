@@ -534,6 +534,7 @@ void decode(int instruct_no)
 	if(instruct_no == 0xd4400000){
 		printf("HLT command detected");
 		RUN_BIT = 0;
+		NEXT_STATE.PC = CURRENT_STATE.PC + 4; 
 		return;
 	}
 
