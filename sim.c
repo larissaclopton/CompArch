@@ -101,23 +101,26 @@ void MUL(int fields[]){
 void LDURx(int nbits, int fields[]){
 
 	uint64_t start_addr = CURRENT_STATE.REGS[fields[3]] + fields[1];
-	//printf("load start addr: %08lx\n", start_addr);
-	//printf("load start addr+32: %08lx\n", start_addr + 32);
+	printf("load start addr: %08lx\n", start_addr);
+	printf("load start addr+32: %08lx\n", start_addr + 4);
 	if(nbits == 64){
+		printf("calling ldur\n");
 		uint64_t lower32 = (uint64_t)mem_read_32(start_addr);
 		//should this be not 32, but 4?)
-		uint64_t upper32 = (uint64_t)mem_read_32(start_addr + 32);
-		//uint64_t temp = (upper32 << 32) + lower32;
-		//printf("set reg %ld", temp);
-		NEXT_STATE.REGS[fields[4]] = (upper32 << 32) + lower32;
+		uint64_t upper32 = (uint64_t)mem_read_32(start_addr + 4);
+		printf("upper 32: %16lx \n", upper32);
+		printf("lower 32: %16lx \n", lower32);
+		NEXT_STATE.REGS[fields[4]] = (upper32 << 32) + (lower32);
 	}
 	else if(nbits == 16){
+		printf("calling ldurh\n");
 		uint64_t val = (uint64_t)mem_read_32(start_addr);
 			//uint64_t temp = val & 0xFFFF;
 			//printf("set reg %ld", temp);
 			NEXT_STATE.REGS[fields[4]] = val & 0xFFFF; // gets bottom 16 bits
 	}
 	else { // nbits = 8
+		printf("calling ldurb\n");
 		uint64_t val = (uint64_t)mem_read_32(start_addr);
 		NEXT_STATE.REGS[fields[4]] = val & 0xFF; // gets bottom 8 bits
 	}
@@ -130,12 +133,14 @@ void STURx(int nbits, int fields[]){
 	//printf("store start addr+32: %08lx\n", start_addr+32);
 	int64_t val = CURRENT_STATE.REGS[fields[4]];
 	if(nbits == 64){
+		printf("calling stur\n");
 		//uint32_t temp = (uint32_t)(val & 0x0000FFFF);
 		//printf("store %d", temp);
 		mem_write_32(start_addr, (uint32_t)(val & 0x0000FFFF));
-		mem_write_32(start_addr+32, (uint32_t)((val >> 32) & 0x0000FFFF));
+		mem_write_32(start_addr+4, (uint32_t)((val >> 32) & 0x0000FFFF));
 	}
-	if(nbits == 16){
+	else if(nbits == 16){
+		printf("calling sturh\n");
 		uint32_t mem = mem_read_32(start_addr);
 		int mask_16 = 0xFFFF << 16;
 		mem = mem & mask_16;
@@ -145,7 +150,8 @@ void STURx(int nbits, int fields[]){
 
 		mem_write_32(start_addr, mem);
 	}
-	if(nbits == 8){
+	else{ // bits = 8
+		printf("calling sturb\n");
 		uint32_t mem = mem_read_32(start_addr);
 		int mask_24 = 0xFFFFFF << 8;
 		mem = mem & mask_24;
@@ -390,13 +396,14 @@ void execute(char inst_type, int fields[])
 				} break;
 				case 0x1C0: { // STURB
 					STURx(8, fields);
+				}	break;
 				case 0x7C2: { // LDUR
 					LDURx(64, fields);
 				} break;
 				case 0x3C2: { // LDURH
 					LDURx(16, fields);
 				} break;
-				case 0x1C2: // LDURB
+				case 0x1C2: { // LDURB
 					LDURx(8, fields);
 				} break;
 
