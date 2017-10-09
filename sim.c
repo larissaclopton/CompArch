@@ -100,7 +100,7 @@ void MUL(int fields[]){
 
 void LDURx(int nbits, int fields[]){
 
-	uint64_t start_addr = fields[3] + uint64_t(fields[1]);
+	uint64_t start_addr = fields[3] + (uint64_t)fields[1];
 	if(nbits == 64){
 		uint64_t lower32 = (uint64_t)mem_read_32(start_addr);
 		//should this be not 32, but 4?)
@@ -130,7 +130,7 @@ void STURx(int nbits, int fields[]){
 		int mask_16 = 0xFFFF << 16;
 		mem = mem & mask_16;
 
-		uint32_t val2 = (uint32_t)val) & 0xFFFF;
+		uint32_t val2 = (uint32_t)val & 0xFFFF;
 		mem = mem + val2;
 
 		mem_write_32(start_addr, mem);
@@ -140,7 +140,7 @@ void STURx(int nbits, int fields[]){
 		int mask_24 = 0xFFFFFF << 8;
 		mem = mem & mask_24;
 
-		uint32_t val2 = (uint32_t)val) & 0xFF;
+		uint32_t val2 = (uint32_t)val & 0xFF;
 		mem = mem + val2;
 
 		mem_write_32(start_addr, mem);
@@ -155,7 +155,7 @@ void CBNZ(int fields[]){
 
 	uint64_t addr = ((uint64_t)fields[1]) << 2;
 
-	if(CURRENT_STATE.REGS[fields[2]] != CURRENT_STATES.REGS[31]) {
+	if(CURRENT_STATE.REGS[fields[2]] != CURRENT_STATE.REGS[31]) {
 		NEXT_STATE.PC = CURRENT_STATE.PC + addr;
 	}
 	else {
@@ -439,6 +439,7 @@ void I_decoder(int instruct_no)
 {
 
 	int five_bit_mask = 0x0000001F;
+	int fields[4];
 
 	//special case for MOVZ
 	if((unsigned)instruct_no >> 23 == 0x000001A5){
@@ -450,7 +451,10 @@ void I_decoder(int instruct_no)
 		instruct_no >>= 2;
 		int opcode = instruct_no & 0x000001FF;
 
-		int fields[] = {opcode, op2, imm, Rd};
+		fields[0] = opcode;
+		fields[1] = op2;
+		fields[2] = imm;
+		fields[3] = Rd;
 	}
 	else{
 		int Rd = instruct_no & five_bit_mask;
@@ -461,7 +465,10 @@ void I_decoder(int instruct_no)
 		instruct_no >>= 12;
 		int opcode = instruct_no & 0x000003FF;
 
-		int fields[] = {opcode, immediate, Rn, Rd};
+		fields[0] = opcode;
+		fields[1] = immediate;
+		fields[2] = Rn;
+		fields[3] = Rd;
 
 		//int i;
 		//for(i = 0; i < 4; i++){
