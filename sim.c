@@ -44,17 +44,17 @@ void SUBx(char instr_type, int set_flag, int fields[]){
 	int64_t temp;
 
 	if(instr_type == 'R'){
-		printf("%ld - %ld", CURRENT_STATE.REGS[fields[3]], CURRENT_STATE.REGS[fields[1]]);
+		//printf("%ld - %ld", CURRENT_STATE.REGS[fields[3]], CURRENT_STATE.REGS[fields[1]]);
 		temp = CURRENT_STATE.REGS[fields[3]] - CURRENT_STATE.REGS[fields[1]];
 		NEXT_STATE.REGS[fields[4]] = temp;
 	}
 	else{
-		printf("%ld - % ld", (int64_t)CURRENT_STATE.REGS[fields[2]], (int64_t)fields[1]);
+		//printf("%ld - % ld", (int64_t)CURRENT_STATE.REGS[fields[2]], (int64_t)fields[1]);
 		temp = (int64_t)CURRENT_STATE.REGS[fields[2]] - (int64_t)fields[1];
 		NEXT_STATE.REGS[fields[3]] = temp;
 	}
 
-	printf("temp %ld", temp);
+	//printf("temp %ld", temp);
 
 	if(set_flag){
 		if(temp < CURRENT_STATE.REGS[31])
@@ -92,7 +92,7 @@ void MUL(int fields[]){
 
 	int64_t temp;
 	temp = (CURRENT_STATE.REGS[fields[3]] * CURRENT_STATE.REGS[fields[1]]);
-	printf("temp %ld", temp);
+	//printf("temp %ld", temp);
 	NEXT_STATE.REGS[fields[4]] = temp;
 
 
@@ -100,16 +100,22 @@ void MUL(int fields[]){
 
 void LDURx(int nbits, int fields[]){
 
-	uint64_t start_addr = fields[3] + (uint64_t)fields[1];
+	uint64_t start_addr = CURRENT_STATE.REGS[fields[3]] + fields[1];
+	//printf("load start addr: %08lx\n", start_addr);
+	//printf("load start addr+32: %08lx\n", start_addr + 32);
 	if(nbits == 64){
 		uint64_t lower32 = (uint64_t)mem_read_32(start_addr);
 		//should this be not 32, but 4?)
 		uint64_t upper32 = (uint64_t)mem_read_32(start_addr + 32);
+		//uint64_t temp = (upper32 << 32) + lower32;
+		//printf("set reg %ld", temp);
 		NEXT_STATE.REGS[fields[4]] = (upper32 << 32) + lower32;
 	}
 	else if(nbits == 16){
 		uint64_t val = (uint64_t)mem_read_32(start_addr);
-      NEXT_STATE.REGS[fields[4]] = val & 0xFFFF; // gets bottom 16 bits
+			//uint64_t temp = val & 0xFFFF;
+			//printf("set reg %ld", temp);
+			NEXT_STATE.REGS[fields[4]] = val & 0xFFFF; // gets bottom 16 bits
 	}
 	else { // nbits = 8
 		uint64_t val = (uint64_t)mem_read_32(start_addr);
@@ -119,11 +125,15 @@ void LDURx(int nbits, int fields[]){
 }
 
 void STURx(int nbits, int fields[]){
-	uint64_t start_addr = fields[3] + fields[1];
+	uint64_t start_addr = CURRENT_STATE.REGS[fields[3]] + fields[1];
+	//printf("store start addr: %08lx\n", start_addr);
+	//printf("store start addr+32: %08lx\n", start_addr+32);
 	int64_t val = CURRENT_STATE.REGS[fields[4]];
 	if(nbits == 64){
+		//uint32_t temp = (uint32_t)(val & 0x0000FFFF);
+		//printf("store %d", temp);
 		mem_write_32(start_addr, (uint32_t)(val & 0x0000FFFF));
-		mem_write_32(start_addr+4, (uint32_t)((val >> 32) & 0x0000FFFF));
+		mem_write_32(start_addr+32, (uint32_t)((val >> 32) & 0x0000FFFF));
 	}
 	if(nbits == 16){
 		uint32_t mem = mem_read_32(start_addr);
@@ -236,10 +246,10 @@ void B_COND(int fields[]){
 
 void LSx(int fields[]){
 
-	int i;
-	for(i = 0; i < 4; i++){
-	     	printf("fields[%d]: %08x \n", i, fields[i]);
-	 	}
+	//int i;
+	//for(i = 0; i < 4; i++){
+	//     	printf("fields[%d]: %08x \n", i, fields[i]);
+	 //	}
 
 	int shamt = fields[1] & 0x03F;
 	int right_shift = (fields[1] >> 6) & 0x03F;
@@ -248,15 +258,15 @@ void LSx(int fields[]){
 	left_shift = (~left_shift) + 1;
 
 
-	printf("executing LSx\n");
+	//printf("executing LSx\n");
 	uint64_t val = (uint64_t)CURRENT_STATE.REGS[fields[2]];
 
 	if(shamt == 0x3F){
-		printf("executing lsr\n");
+		//printf("executing lsr\n");
 		NEXT_STATE.REGS[fields[3]] = val >> right_shift;
 	}
 	else {
-		printf("executing lsl\n");
+		//printf("executing lsl\n");
 		NEXT_STATE.REGS[fields[3]] = val << left_shift;
 	}
 
@@ -277,7 +287,7 @@ void MOVZ(int fields[]){
 		val <<= 48;
 	}
 
-	printf("MOVZ val %ld", val);
+	//printf("MOVZ val %ld", val);
 	NEXT_STATE.REGS[fields[3]] = (int64_t)val;
 }
 
@@ -300,14 +310,14 @@ void execute(char inst_type, int fields[])
 	switch (inst_type){
 		case 'R': {
 
-			printf("case R\n");
+			//printf("case R\n");
 			switch(fields[0]) {
 
             	case 0x458: { // ADD
             	   	ADDx('R', 0, fields);
 								} break;
                	case 0x558: { // ADDS
-									printf("ADDS ... \n");
+									//printf("ADDS ... \n");
 									ADDx('R', 1, fields);
 								} break;
                	case 0x450: { // AND
@@ -326,7 +336,7 @@ void execute(char inst_type, int fields[])
 									SUBx('R', 0, fields);
                 } break;
 								case 0x758: { // SUBS
-									printf("SUBS ... \n");
+									//printf("SUBS ... \n");
 									SUBx('R', 1, fields);
 								} break;
                	case 0x4D8: { // MUL
@@ -341,14 +351,14 @@ void execute(char inst_type, int fields[])
 
 		} break;
 		case 'I': {
-			printf("case I\n");
+			//printf("case I\n");
 			switch(fields[0]) {
 
 				case 0x244: { // ADDI
 					ADDx('I', 0, fields);
 				} break;
 				case 0x2c4: { // ADDIS
-					printf("ADDIS ... \n");
+					//printf("ADDIS ... \n");
 					ADDx('I', 1, fields);
 				} break;
 				case 0x344: { // SUBI
@@ -369,7 +379,7 @@ void execute(char inst_type, int fields[])
 			NEXT_STATE.PC = CURRENT_STATE.PC + 4;
 		} break;
 		case 'D': {
-			printf("case D\n");
+			//printf("case D\n");
 			switch(fields[0]) {
 
 				case 0x7C0: { // STUR
@@ -442,10 +452,10 @@ void R_decoder(int instruct_no)
 
 	int fields[] = {opcode, Rm, shamt, Rn, Rd};
 
-	int i;
-	for(i = 0; i < 5; i++){
-		printf("%08x \n", fields[i]);
-	}
+	//int i;
+	//for(i = 0; i < 5; i++){
+	//	printf("%08x \n", fields[i]);
+	//}
 	execute('R', fields);
 
 }
@@ -547,7 +557,7 @@ void decode(int instruct_no)
 
 	//unique commands
 	if(instruct_no == 0xd4400000){ // HLT
-		printf("HLT command detected");
+		//printf("HLT command detected");
 		RUN_BIT = 0;
 		NEXT_STATE.PC = CURRENT_STATE.PC + 4;
 		return;
@@ -563,7 +573,7 @@ void decode(int instruct_no)
 	unsigned int first_3 = op0 >> 1;
 	unsigned int last_3 = op0 & 0x00000007;
 
-	printf("first_3: %03x | last_3: %03x \n", first_3, last_3);
+	//printf("first_3: %03x | last_3: %03x \n", first_3, last_3);
 
 	//Branches, Exception Generating and System Instructions
 	if(first_3 == 5){
@@ -572,7 +582,7 @@ void decode(int instruct_no)
 	}
 	//Data Processing -- Immediate
 	else if(first_3 == 4){
-		printf("I decoding...\n");
+		//printf("I decoding...\n");
 		I_decoder(instruct_no);
 	}
 	//Unallocated
@@ -580,7 +590,7 @@ void decode(int instruct_no)
 	}
 	//Data Processing -- Register
 	else if(last_3 == 5){
-		printf("R decoding...\n");
+		//printf("R decoding...\n");
 		R_decoder(instruct_no);
 	}
 	//Data Processing -- Scalar Floating-Point and Advanced SIMD
