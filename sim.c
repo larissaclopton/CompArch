@@ -236,13 +236,28 @@ void B_COND(int fields[]){
 
 void LSx(int fields[]){
 
-	uint64_t val = (uint64_t)CURRENT_STATE.REGS[fields[3]];
+	int i;
+	for(i = 0; i < 4; i++){
+	     	printf("fields[%d]: %08x \n", i, fields[i]);
+	 	}
 
-	if(fields[2] == 0x3F){
-		NEXT_STATE.REGS[fields[4]] = val >> fields[2];
+	int shamt = fields[1] & 0x03F;
+	int right_shift = (fields[1] >> 6) & 0x03F;
+	int mask = (-1) << 6;
+	int left_shift = right_shift | mask;
+	left_shift = (~left_shift) + 1;
+
+
+	printf("executing LSx\n");
+	uint64_t val = (uint64_t)CURRENT_STATE.REGS[fields[2]];
+
+	if(shamt == 0x3F){
+		printf("executing lsr\n");
+		NEXT_STATE.REGS[fields[3]] = val >> right_shift;
 	}
 	else {
-		NEXT_STATE.REGS[fields[4]] = val << fields[2];
+		printf("executing lsl\n");
+		NEXT_STATE.REGS[fields[3]] = val << left_shift;
 	}
 
 }
@@ -320,9 +335,6 @@ void execute(char inst_type, int fields[])
 								case 0x6B0: { // BR
 									BR(fields);
 								} break;
-								case 0x34D: {
-									LSx(fields);
-								} break;
 			}
 
 			NEXT_STATE.PC = CURRENT_STATE.PC + 4;
@@ -347,6 +359,9 @@ void execute(char inst_type, int fields[])
 				} break;
 				case 0x1A5: {//MOVZ
 					MOVZ(fields);
+				} break;
+				case 0x34D: { //lsx
+					LSx(fields);
 				} break;
 
 			}
@@ -531,12 +546,16 @@ void decode(int instruct_no)
 {
 
 	//unique commands
-	if(instruct_no == 0xd4400000){
+	if(instruct_no == 0xd4400000){ // HLT
 		printf("HLT command detected");
 		RUN_BIT = 0;
-		NEXT_STATE.PC = CURRENT_STATE.PC + 4; 
+		NEXT_STATE.PC = CURRENT_STATE.PC + 4;
 		return;
 	}
+	//else if((((unsigned)instruct_no) >> 22) == 0x34D ){ // LSx
+	//	R_decoder(instruct_no);
+	//	return;
+	//}
 
 
 	unsigned int op0 = ((unsigned)(instruct_no << 3) >> 28);
