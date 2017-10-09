@@ -266,6 +266,18 @@ void MOVZ(int fields[]){
 	NEXT_STATE.REGS[fields[3]] = (int64_t)val;
 }
 
+void EOR(int fields[]){
+	int64_t temp;
+	temp = CURRENT_STATE.REGS[fields[1]] ^ CURRENT_STATE.REGS[fields[3]];
+	NEXT_STATE.REGS[fields[4]] = temp;
+}
+
+void ORR(int fields[]){
+	int64_t temp;
+	temp = CURRENT_STATE.REGS[fields[1]] | CURRENT_STATE.REGS[fields[3]];
+	NEXT_STATE.REGS[fields[4]] = temp;
+}
+
 
 // Execution implementation
 void execute(char inst_type, int fields[])
@@ -290,8 +302,10 @@ void execute(char inst_type, int fields[])
 									ANDx(1, fields);
                 } break;
                	case 0x650: { // EOR
+									EOR(fields);
                 } break;
                	case 0x550: { // ORR
+									ORR(fields);
                 } break;
                	case 0x658: { // SUB
 									SUBx('R', 0, fields);
@@ -318,24 +332,20 @@ void execute(char inst_type, int fields[])
 			printf("case I\n");
 			switch(fields[0]) {
 
-				case 0x244: // ADDI
-				case 0x489: { // ADDI
+				case 0x244: { // ADDI
 					ADDx('I', 0, fields);
 				} break;
-				case 0x2c4: // ADDIS ... I'm confused on how to handle the range here...
-				case 0x589: { // ADDIS ... 589 shifted all the way right becomes 2c4 as well?
+				case 0x2c4: { // ADDIS
 					printf("ADDIS ... \n");
 					ADDx('I', 1, fields);
 				} break;
-				case 0x3c4: // SUBI
-				case 0x689: { // SUBI
+				case 0x344: { // SUBI
 					SUBx('I', 0, fields);
 				} break;
-				case 0x788: // SUBIS
-				case 0x789: { // SUBIS
+				case 0x3c4: { // SUBIS
 					SUBx('I', 1, fields);
 				} break;
-				case 0x000001A5: {//MOVZ
+				case 0x1A5: {//MOVZ
 					MOVZ(fields);
 				} break;
 
@@ -348,13 +358,13 @@ void execute(char inst_type, int fields[])
 			switch(fields[0]) {
 
 				case 0x7C0: { // STUR
-					//STURx(64, fields);
+					STURx(64, fields);
 				} break;
 				case 0x3C0: { // STURH
-					//STURx(16, fields);
+					STURx(16, fields);
 				} break;
 				case 0x1C0: { // STURB
-					//STURx(8, fields);
+					STURx(8, fields);
 				case 0x7C2: { // LDUR
 					LDURx(64, fields);
 				} break;
@@ -372,10 +382,10 @@ void execute(char inst_type, int fields[])
 		case 'C': {
 			switch (fields[0]) {
 				case 0xB5: { //CBNZ
-					//call function
+					CBNZ(fields);
 				} break;
 				case 0xB4: { //CBZ
-					//call function
+					CBZ(fields);
 				} break;
 				case 0x54: { //b.cond
 					//call function
@@ -483,27 +493,30 @@ void D_decoder(int instruct_no)
 }
 
 void B_decoder(int instruct_no){
-	//conditional branching
-	if((((unsigned) instruct_no) >> 24) == 0x00000054){
-		int Rt = instruct_no & 0x0000001F;
-		instruct_no >>= 5;
-		int br_addr = instruct_no & 0x0007FFFF;
-		//br_addr = (br_addr << 2);
-		instruct_no >>= 19;
-		int opcode = instruct_no & 0x000000FF;
-
-		int fields[] = {opcode, br_addr, Rt};
-
-		execute('C', fields);
-	}
-	//nonconditional Branching
-	else{
+	//nonconditional immediate branching if 6 bit opcode is 0x05
+	if ((((unsigned) instruct_no) >> 26) == 0x00000005) {
 		int br_addr = instruct_no & 0x03FFFFFF;
 		int opcode = ((unsigned)instruct_no) >> 26;
 
 		int fields[] = {opcode, br_addr};
 
 		execute('B', fields);
+	}
+	//nonconditional register branching if 7 bit opcode 0x6b
+	else if ((((unsigned)instruct_no) >> 25) == 0x0000006b) {
+		R_decoder(instruct_no);
+	}
+	//otherwise it's conditional branching, with 8-bit op codes
+	else {
+		int Rt = instruct_no & 0x0000001F;
+		instruct_no >>= 5;
+		int br_addr = instruct_no & 0x0007FFFF;
+		instruct_no >>= 19;
+		int opcode = instruct_no & 0x000000FF;
+
+		int fields[] = {opcode, br_addr, Rt};
+
+		execute('C', fields);
 	}
 }
 
