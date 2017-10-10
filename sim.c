@@ -57,15 +57,19 @@ void SUBx(char instr_type, int set_flag, int fields[]){
 	//printf("temp %ld", temp);
 
 	if(set_flag){
+		printf("setting flag after subx...\n");
 		if(temp < CURRENT_STATE.REGS[31])
-                        NEXT_STATE.FLAG_N = 1;
-                else
-                        NEXT_STATE.FLAG_N = 0;
+    	NEXT_STATE.FLAG_N = 1;
+    else
+      NEXT_STATE.FLAG_N = 0;
 
-                if(temp == CURRENT_STATE.REGS[31])
-                        NEXT_STATE.FLAG_Z = 1;
-                else
-                        NEXT_STATE.FLAG_Z = 0;
+    if(temp == CURRENT_STATE.REGS[31])
+      NEXT_STATE.FLAG_Z = 1;
+    else
+    	NEXT_STATE.FLAG_Z = 0;
+
+			//set 0-register to 0
+			NEXT_STATE.REGS[31] = 0;
 	}
 
 }
@@ -196,6 +200,8 @@ void CBZ(int fields[]){
 
 }
 
+// I think we need to fix this...should extend 0s and shift two like
+// the other branches??? yes no maybe so?
 void BR(int fields[]){
 
 	NEXT_STATE.PC = CURRENT_STATE.REGS[fields[3]];
@@ -218,36 +224,46 @@ void B_COND(int fields[]){
 
 	switch (cond) {
 		case 0x00000000: { //equal
+			printf("executing beq...\n");
 			//if Z = 1,
 			if(CURRENT_STATE.FLAG_Z == 1)
 				branch = 1;
 		} break;
 		case 0x00000001: { // not equal
+			printf("executing bne...\n");
 			if( CURRENT_STATE.FLAG_Z == 0)
 				branch = 1;
 		} break;
 		case 0x0000000A: { // greater than or equal
+			printf("executing bge...\n");
 			if(CURRENT_STATE.FLAG_N == 0)
 				branch = 1;
 		} break;
 		case 0x0000000B: { // less than
+			printf("executing bl...\n");
 			if(CURRENT_STATE.FLAG_N == 1)
 				branch = 1;
 		} break;
 		case 0x0000000C: {//greater than
+			printf("executing bg...\n");
 			if(CURRENT_STATE.FLAG_Z == 0 && CURRENT_STATE.FLAG_N == 0)
 				branch = 1;
 		} break;
 		case 0x0000000D: {//less than or equal to
+			printf("executing ble...\n");
 			if(!(CURRENT_STATE.FLAG_Z == 0 && CURRENT_STATE.FLAG_N == 0))
 				branch = 1;
 		} break;
 	}
 
-	if(branch)
+	if(branch){
+		printf("branching...\n");
 		NEXT_STATE.PC = CURRENT_STATE.PC + addr;
-	else
+	}
+	else{
+		printf("not branching...\n");
 		NEXT_STATE.PC = CURRENT_STATE.PC + 4;
+	}
 }
 
 void LSx(int fields[]){
@@ -319,9 +335,12 @@ void execute(char inst_type, int fields[])
 			//printf("case R\n");
 			switch(fields[0]) {
 
+							case 0x459: // ADD extended format treated as ADD
             	case 0x458: { // ADD
+									printf("add...\n");
             	   	ADDx('R', 0, fields);
 								} break;
+								case 0x559: // ADDS extended format treated as ADDS
                	case 0x558: { // ADDS
 									//printf("ADDS ... \n");
 									ADDx('R', 1, fields);
@@ -338,11 +357,13 @@ void execute(char inst_type, int fields[])
                	case 0x550: { // ORR
 									ORR(fields);
                 } break;
+								case 0x659: // SUB extended format treated as SUB
                	case 0x658: { // SUB
 									SUBx('R', 0, fields);
                 } break;
+								case: 0x759: // SUBS extended format treated as SUBS
 								case 0x758: { // SUBS
-									//printf("SUBS ... \n");
+									printf("SUBS ... \n");
 									SUBx('R', 1, fields);
 								} break;
                	case 0x4D8: { // MUL
@@ -361,6 +382,7 @@ void execute(char inst_type, int fields[])
 			switch(fields[0]) {
 
 				case 0x244: { // ADDI
+					printf("addi...\n");
 					ADDx('I', 0, fields);
 				} break;
 				case 0x2c4: { // ADDIS
@@ -420,12 +442,14 @@ void execute(char inst_type, int fields[])
 					CBZ(fields);
 				} break;
 				case 0x54: { //b.cond
+					printf("executing b.cond...\n");
 					B_COND(fields);
 				} break;
 			}
-		}
+		} break;
 		case 'B': {
 			//call function (immediate branching)
+			printf("immediate branching...\n");
 			BRANCH_IMM(fields);
 		} break;
 
@@ -493,7 +517,7 @@ void I_decoder(int instruct_no)
 		instruct_no >>= 5;
 		int Rn = instruct_no & five_bit_mask;
 		instruct_no >>= 5;
-		int64_t immediate = instruct_no & 0x00000FFF;
+		int immediate = instruct_no & 0x00000FFF;
 		instruct_no >>= 12;
 		int opcode = instruct_no & 0x000003FF;
 
