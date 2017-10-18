@@ -58,10 +58,10 @@ static Pipe_Reg_EXtoMEM EXtoMEM;
 
 
 // Execution implementation
-void execute(char inst_type, int fields[])
+void execute(char instr_type, int fields[])
 {
   //int branch_reg = 0;
-  switch (inst_type){
+  switch (instr_type){
     case 'R': {
       //printf("case R\n");
       switch(fields[0]) {
@@ -222,16 +222,16 @@ void R_decoder(int instruct_no)
 		opcode = 0x0000034D;
 
 	IDtoEX.fields[0] = opcode;
-  IDtoEX.fields[1] = Rm;
-  IDtoEX.fields[2] = shamt;
-  IDtoEX.fields[3] = Rn;
-  IDtoEX.fields[4] = Rd;
+ 	IDtoEX.fields[1] = Rm;
+ 	IDtoEX.fields[2] = shamt;
+ 	IDtoEX.fields[3] = Rn;
+ 	IDtoEX.fields[4] = Rd;
 
 	//int i;
 	//for(i = 0; i < 5; i++){
 	//	printf("%08x \n", fields[i]);
 	//}
-  IDtoEX.instr_type = 'R';
+  	IDtoEX.instr_type = 'R';
 }
 
 void I_decoder(int instruct_no)
@@ -254,7 +254,7 @@ void I_decoder(int instruct_no)
 		IDtoEX.fields[1] = op2;
 		IDtoEX.fields[2] = imm;
 		IDtoEX.fields[3] = Rd;
-    IDtoEX.fields[4] = 0;
+   	IDtoEX.fields[4] = 0;
 	}
 	else{
 		int Rd = instruct_no & five_bit_mask;
@@ -269,7 +269,7 @@ void I_decoder(int instruct_no)
 		IDtoEX.fields[1] = immediate;
 		IDtoEX.fields[2] = Rn;
 		IDtoEX.fields[3] = Rd;
-    IDtoEX.fields[4] = 0;
+   	IDtoEX.fields[4] = 0;
 
 		//int i;
 		//for(i = 0; i < 4; i++){
@@ -277,7 +277,7 @@ void I_decoder(int instruct_no)
      //	}
 	}
 
-  IDtoEX.instr_type = 'I';
+ 	IDtoEX.instr_type = 'I';
 }
 
 void D_decoder(int instruct_no)
@@ -295,12 +295,12 @@ void D_decoder(int instruct_no)
 	int opcode = instruct_no & 0x000007FF;
 
 	IDtoEX.fields[0] = opcode;
-  IDtoEX.fields[1] = offset;
-  IDtoEX.fields[2] = op2;
-  IDtoEX.fields[3] = Rn;
-  IDtoEX.fields[4] = Rt;
+ 	IDtoEX.fields[1] = offset;
+ 	IDtoEX.fields[2] = op2;
+ 	IDtoEX.fields[3] = Rn;
+ 	IDtoEX.fields[4] = Rt;
 
-  IDtoEX.instr_type = 'D';
+ 	IDtoEX.instr_type = 'D';
 }
 
 void B_decoder(int instruct_no){
@@ -311,18 +311,17 @@ void B_decoder(int instruct_no){
 		int opcode = ((unsigned)instruct_no) >> 26;
 
 		IDtoEX.fields[0] = opcode;
-    IDtoEX.fields[1] = br_addr;
-    IDtoEX.fields[2] = 0;
-    IDtoEX.fields[3] = 0;
-    IDtoEX.fields[4] = 0;
+   	IDtoEX.fields[1] = br_addr;
+   	IDtoEX.fields[2] = 0;
+   	IDtoEX.fields[3] = 0;
+   	IDtoEX.fields[4] = 0;
 
-    IDtoEX.instr_type = 'B';
+    	IDtoEX.instr_type = 'B';
 	}
 	//nonconditional register branching if 7 bit opcode 0x6b
 	else if ((((unsigned)instruct_no) >> 25) == 0x0000006b) {
     //NOTE: instr_type and fields will be set in R_decoder
 		R_decoder(instruct_no);
-    return;
 	}
 	//otherwise it's conditional branching, with 8-bit op codes
 	else {
@@ -333,12 +332,12 @@ void B_decoder(int instruct_no){
 		int opcode = instruct_no & 0x000000FF;
 
 		IDtoEX.fields[0] = opcode;
-    IDtoEX.fields[1] = br_addr;
-    IDtoEX.fields[2] = Rt;
-    IDtoEX.fields[3] = 0;
-    IDtoEX.fields[4] = 0;
+    	IDtoEX.fields[1] = br_addr;
+    	IDtoEX.fields[2] = Rt;
+    	IDtoEX.fields[3] = 0;
+    	IDtoEX.fields[4] = 0;
 
-    IDtoEX.instr_type = 'C';
+    	IDtoEX.instr_type = 'C';
 	}
 }
 
@@ -364,13 +363,13 @@ void decode(int instruct_no)
 	//Branches, Exception Generating and System Instructions
 	if(first_3 == 5){
 		B_decoder(instruct_no);
-    return;
+    	return;
 	}
 	//Data Processing -- Immediate
 	else if(first_3 == 4){
 		//printf("I decoding...\n");
 		I_decoder(instruct_no);
-    return;
+    	return;
 	}
 	//Unallocated
 	else if((first_3 >> 1) == 0){
@@ -380,15 +379,16 @@ void decode(int instruct_no)
 	else if(last_3 == 5){
 		//printf("R decoding...\n");
 		R_decoder(instruct_no);
-    return;
+    	return;
 	}
 	//Data Processing -- Scalar Floating-Point and Advanced SIMD
 	else if(last_3 == 7){
+		printf("data processing - scalar floating point\n");
 	}
 	//Loads and Stores
 	else{
 		D_decoder(instruct_no);
-    return;
+    	return;
 	}
 
 	printf("ERROR: Unrecognized Command.\n");
@@ -408,7 +408,7 @@ void pipe_stage_mem()
 
 void pipe_stage_execute()
 {
-  execute(IDtoEX.inst_type, IDtoEX.fields);
+  execute(IDtoEX.instr_type, IDtoEX.fields);
 }
 
 void pipe_stage_decode()
@@ -418,10 +418,10 @@ void pipe_stage_decode()
 
 void pipe_stage_fetch()
 {
-  uint32_t temp = mem_read_32(CURRENT_STATE.PC);
-	printf("%08x \n", temp);
+ 	uint32_t temp = mem_read_32(CURRENT_STATE.PC);
+	//printf("%08x \n", temp);
 	IFtoID.instruction = temp;
-  CURRENT_STATE.PC += 4;
+ 	CURRENT_STATE.PC += 4;
 }
 
 void pipe_cycle()
