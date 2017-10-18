@@ -45,15 +45,170 @@ typedef struct Pipe_Reg_IDtoEX{
 static Pipe_Reg_IDtoEX IDtoEX;
 
 typedef struct Pipe_Reg_EXtoMEM{
-  int64_t result;
-  bool branch;
-  bool mem_read;
-  bool mem_write;
-  bool reg_write;
-  bool mem_to_reg;
-} Pipe_EXtoMEM;
+ 	int64_t result;
+	int dest_register;
+	int mem_address;
+ 	bool branch;
+ 	bool mem_read;
+ 	bool mem_write;
+ 	bool reg_write;
+ 	bool mem_to_reg;
+} Pipe_Reg_EXtoMEM;
 
 static Pipe_Reg_EXtoMEM EXtoMEM;
+
+// Function implementations
+
+void ADDx(char instr_type, int set_flag, int fields[]){
+	int64_t temp;
+
+	if(instr_type == 'R'){
+		// TODO: check if registers are waiting to be written
+		temp = CURRENT_STATE.REGS[fields[1]] + CURRENT_STATE.REGS[fields[3]];
+		EXtoMEM.dest_register = fields[4];
+	}
+	else{
+		//TODO: check if register is waiting to be written
+		temp = fields[1] + CURRENT_STATE.REGS[fields[2]];
+		EXtoMEM.dest_register = fields[3];
+	}
+	EXtoMEM.result = temp;
+
+	//TODO: still set flags in current state?
+	if(set_flag){
+		if(temp < CURRENT_STATE.REGS[31])
+                        CURRENT_STATE.FLAG_N = 1;
+                else
+                        CURRENT_STATE.FLAG_N = 0;
+
+                if(temp == CURRENT_STATE.REGS[31])
+                        CURRENT_STATE.FLAG_Z = 1;
+                else
+                        CURRENT_STATE.FLAG_Z = 0;
+	}
+}
+
+void SUBx(char instr_type, int set_flag, int fields[]){
+	int64_t temp;
+
+	if(instr_type == 'R'){
+		//TODO: check if registers are waiting to be written
+		temp = CURRENT_STATE.REGS[fields[3]] - CURRENT_STATE.REGS[fields[1]];
+		EXtoMEM.dest_register = fields[4];
+	}
+	else{
+		//TODO: check if register waiting to be written
+		temp = (int64_t)CURRENT_STATE.REGS[fields[2]] - (int64_t)fields[1];
+		EXtoMEM.dest_register = fields[3];
+	}
+	EXtoMEM.result = temp;
+
+	//TODO: still set flags in current state?	
+	if(set_flag){
+		if(temp < CURRENT_STATE.REGS[31])
+    	CURRENT_STATE.FLAG_N = 1;
+    else
+      CURRENT_STATE.FLAG_N = 0;
+
+    if(temp == CURRENT_STATE.REGS[31])
+      CURRENT_STATE.FLAG_Z = 1;
+    else
+    	CURRENT_STATE.FLAG_Z = 0;
+
+			//set 0-register to 0
+			CURRENT_STATE.REGS[31] = 0;
+	}
+}
+
+void ANDx(int set_flag, int fields[]) {
+	//TODO: check if registers are waiting to be written
+	int64_t temp = CURRENT_STATE.REGS[fields[3]] & CURRENT_STATE.REGS[fields[1]];
+	EXtoMEM.dest_register = fields[4];
+	EXtoMEM.result = temp;
+
+	//TODO: still set flags in current state?
+	if(set_flag){
+		if(temp < CURRENT_STATE.REGS[31])
+			CURRENT_STATE.FLAG_N = 1;
+		else
+			CURRENT_STATE.FLAG_N = 0;
+
+		if(temp == CURRENT_STATE.REGS[31])
+			CURRENT_STATE.FLAG_Z = 1;
+		else
+			CURRENT_STATE.FLAG_Z = 0;
+	}
+}
+
+void MUL(int fields[]){
+	//TODO: check if registers are waiting to be written
+	int64_t temp = (CURRENT_STATE.REGS[fields[3]] * CURRENT_STATE.REGS[fields[1]]);
+	EXtoMEM.dest_register = fields[4];
+	EXtoMEM.result = temp;
+}
+
+void EOR(int fields[]){
+	//TODO: check if registers are waiting to be written
+	int64_t temp = CURRENT_STATE.REGS[fields[1]] ^ CURRENT_STATE.REGS[fields[3]];
+	EXtoMEM.dest_register = fields[4];
+	EXtoMEM.result = temp;
+}
+
+void ORR(int fields[]){
+	//TODO: check if registers are waiting to be written
+	int64_t temp = CURRENT_STATE.REGS[fields[1]] | CURRENT_STATE.REGS[fields[3]];
+	EXtoMEM.dest_register = fields[4];
+	EXtoMEM.result = temp;
+}
+
+void BR(int fields[]){
+	EXtoMEM.reg_write = false;
+	EXtoMEM.branch = true; //TODO: is this right?
+
+	//TODO: check if register is waiting to be written
+	//TODO: how to squash instructions already in pipeline?
+	CURRENT_STATE.PC = CURRENT_STATE.REGS[fields[3]];
+}
+
+void MOVZ(int fields[]){
+	int64_t val = (int64_t)fields[2];
+
+	// no action required if fields[1] == 0
+	if(fields[1] == 1) {
+		val <<= 16;
+	}
+	else if(fields[1] == 2){
+		val <<= 32;
+	}
+	else if(fields[1] == 3){
+		val <<= 48;
+	}
+
+	EXtoMEM.dest_register = fields[3];
+	EXtoMEM.result = val;
+}
+
+void LSx(int fields[]){
+	int shamt = fields[1] & 0x3F;
+	int right_shift = (fields[1] >> 6) & 0x3F;
+	int mask = (-1) << 6;
+	int left_shift = right_shift | mask;
+	left_shift = (~left_shift) + 1;
+
+	//TODO: check if register is waiting to be written
+	uint64_t val = (uint64_t)CURRENT_STATE.REGS[fields[2]];
+
+	if(shamt == 0x3F){
+		val >>= right_shift;
+	}
+	else {
+		val <<= left_shift;
+	}
+
+	EXtoMEM.dest_register = fields[3];
+	EXtoMEM.result = (int64_t)val;
+
+}
 
 
 
@@ -64,6 +219,11 @@ void execute(char instr_type, int fields[])
   switch (instr_type){
     case 'R': {
       //printf("case R\n");
+		EXtoMEM.mem_address = 0;
+		EXtoMEM.branch = false; //NOTE: will need to be reset in BR
+		EXtoMEM.mem_read = false;
+		EXtoMEM.reg_write = true; //NOTE: will need to be reset in BR
+		EXtoMEM.mem_to_reg = false;		
       switch(fields[0]) {
 
               case 0x459: // ADD extended format treated as ADD
@@ -102,17 +262,17 @@ void execute(char instr_type, int fields[])
                 } break;
                 case 0x6B0: { // BR
                   BR(fields);
-                  //branch_reg = 1;
                 } break;
       }
-
-      //don't touch PC if branching has occurred
-      // if(!branch_reg)
-      // 	NEXT_STATE.PC = CURRENT_STATE.PC + 4;
 
     } break;
     case 'I': {
       //printf("case I\n");
+		EXtoMEM.mem_address = 0;
+		EXtoMEM.branch = false;
+		EXtoMEM.mem_read = false;
+		EXtoMEM.reg_write = true;
+		EXtoMEM.mem_to_reg = false;
       switch(fields[0]) {
 
         case 0x244: { // ADDI
