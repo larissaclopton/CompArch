@@ -32,14 +32,6 @@ static Pipe_Reg_IFtoID IFtoID;
 typedef struct Pipe_Reg_IDtoEX{
   int fields[5];
   char instr_type;
-  // bool ALU_op1;
-  // bool ALU_op0;
-  // bool ALU_src;
-  // bool branch;
-  // bool mem_read;
-  // bool mem_write;
-  // bool reg_write;
-  // bool mem_to_reg;
 } Pipe_Reg_IDtoEX;
 
 static Pipe_Reg_IDtoEX IDtoEX;
@@ -47,7 +39,8 @@ static Pipe_Reg_IDtoEX IDtoEX;
 typedef struct Pipe_Reg_EXtoMEM{
  	int64_t result;
 	int dest_register;
-	int mem_address;
+	uint64_t mem_address;
+	int nbits; // for STURx and LDURx
  	bool branch;
  	bool mem_read;
  	bool mem_write;
@@ -56,6 +49,15 @@ typedef struct Pipe_Reg_EXtoMEM{
 } Pipe_Reg_EXtoMEM;
 
 static Pipe_Reg_EXtoMEM EXtoMEM;
+
+typedef struct Pipe_Reg_MEMtoWB{
+	int64_t result;
+	int dest_register;
+	bool reg_write;
+	bool mem_to_reg;
+} Pipe_Reg_MEMtoWB;
+
+static Pipe_Reg_MEMtoWB MEMtoWB;
 
 // Function implementations
 
@@ -163,7 +165,7 @@ void ORR(int fields[]){
 
 void BR(int fields[]){
 	EXtoMEM.reg_write = false;
-	EXtoMEM.branch = true; //TODO: is this right?
+	EXtoMEM.branch = true;
 
 	//TODO: check if register is waiting to be written
 	//TODO: how to squash instructions already in pipeline?
@@ -210,6 +212,233 @@ void LSx(int fields[]){
 
 }
 
+void STURx(int nbits, int fields[]){
+
+	EXtoMEM.dest_register = 0;
+	EXtoMEM.mem_read = false;
+	EXtoMEM.mem_write = true;
+	EXtoMEM.reg_write = false;
+	EXtoMEM.mem_to_reg = false;
+
+	//TODO: check if register is waiting to be written
+	uint64_t start_addr = CURRENT_STATE.REGS[fields[3]] + fields[1];
+	//TODO: check if register is waiting to be written
+	int64_t val = CURRENT_STATE.REGS[fields[4]];
+	int64_t result;
+	if(nbits == 64){
+		result = val;
+		//mem_write_32(start_addr, (uint32_t)(val & 0xFFFFFFFF));
+		//mem_write_32(start_addr+4, (uint32_t)((val >> 32) & 0xFFFFFFFF));
+	}
+	else if(nbits == 16){
+		//TODO: check if memory is waiting to be written
+		uint32_t mem = mem_read_32(start_addr);
+		int mask_16 = 0xFFFF << 16;
+		mem = mem & mask_16;
+
+		uint32_t val2 = (uint32_t)val & 0xFFFF;
+		mem = mem + val2;
+		result = (int64_t)mem;
+		//mem_write_32(start_addr, mem);
+	}
+	else{ // bits = 8
+		//TODO: check if memory is waiting to be written
+		uint32_t mem = mem_read_32(start_addr);
+		int mask_24 = 0xFFFFFF << 8;
+		mem = mem & mask_24;
+
+		uint32_t val2 = (uint32_t)val & 0xFF;
+		mem = mem + val2;
+		result = (int64_t)mem;
+		//mem_write_32(start_addr, mem);
+	}
+
+	EXtoMEM.mem_address = start_addr;
+	EXtoMEM.result = result;
+	EXtoMEM.nbits = nbits;
+
+}
+
+void LDURx(int nbits, int fields[]){
+
+	EXtoMEM.result = 0;
+	EXtoMEM.mem_read = true;
+	EXtoMEM.mem_write = false;
+	EXtoMEM.mem_to_reg = true;
+	EXtoMEM.reg_write = true;
+	
+	//TODO: check whether register is waiting to be written
+	uint64_t start_addr = CURRENT_STATE.REGS[fields[3]] + fields[1];
+	//printf("load start addr: %08lx\n", start_addr);
+	//printf("load start addr+32: %08lx\n", start_addr + 4);
+	if(nbits == 64){
+		//printf("calling ldur\n");
+		//uint64_t lower32 = (uint64_t)mem_read_32(start_addr);
+		//should this be not 32, but 4?)
+		//uint64_t upper32 = (uint64_t)mem_read_32(start_addr + 4);
+		//printf("upper 32: %16lx \n", upper32);
+		//printf("lower 32: %16lx \n", lower32);
+		//NEXT_STATE.REGS[fields[4]] = (upper32 << 32) + (lower32);
+	}
+	else if(nbits == 16){
+		//printf("calling ldurh\n");
+		//uint64_t val = (uint64_t)mem_read_32(start_addr);
+			//uint64_t temp = val & 0xFFFF;
+			//printf("set reg %ld", temp);
+			//NEXT_STATE.REGS[fields[4]] = val & 0xFFFF; // gets bottom 16 bits
+	}
+	else { // nbits = 8
+		//printf("calling ldurb\n");
+		//uint64_t val = (uint64_t)mem_read_32(start_addr);
+		//NEXT_STATE.REGS[fields[4]] = val & 0xFF; // gets bottom 8 bits
+	}
+
+	EXtoMEM.mem_address = start_addr;
+	EXtoMEM.nbits = nbits;
+	EXtoMEM.dest_register = fields[4];
+
+}
+
+void BRANCH_IMM(int fields[]){
+	//printf("branching IMM\n");
+	int64_t addr = (((((int64_t)fields[1]) << 38 ) >> 38) << 2);
+	CURRENT_STATE.PC = CURRENT_STATE.PC - 4 + addr;
+	//printf("bar addr: %016lx\n", NEXT_STATE.PC);
+	
+}
+
+void CBNZ(int fields[]){
+
+	// need to shift address to be 64 bits
+	// left extend by 43, bottom 2 bits 0
+	// could also call B
+
+	int64_t addr = (((((int64_t)fields[1]) << 45 ) >> 45) << 2);
+
+	//TODO: check if register is waiting to be written
+	if(CURRENT_STATE.REGS[fields[2]] != CURRENT_STATE.REGS[31]) {
+		EXtoMEM.branch = true;
+		CURRENT_STATE.PC = CURRENT_STATE.PC - 4 + addr;
+	}
+	else {
+		//NEXT_STATE.PC = CURRENT_STATE.PC + 4;
+		EXtoMEM.branch = false;
+	}
+
+}
+
+void CBZ(int fields[]){
+
+	// need to shift address to be 64 bits
+	// left extend by 43, bottom 2 bits 0
+	// could also call B
+	int64_t addr = (((((int64_t)fields[1]) << 45 ) >> 45) << 2);
+
+	//TODO: check if register is waiting to be written
+	if(CURRENT_STATE.REGS[fields[2]] == CURRENT_STATE.REGS[31]) {
+		EXtoMEM.branch = true;
+		CURRENT_STATE.PC = CURRENT_STATE.PC - 4 + addr;
+	}
+	else {
+		EXtoMEM.branch = false;
+		//NEXT_STATE.PC = CURRENT_STATE.PC + 4;
+	}
+
+}
+
+void B_COND(int fields[]){
+
+	int64_t addr = (((((int64_t)fields[1]) << 45 ) >> 45) << 2);
+
+	int cond = fields[2] & 0x0000000F;
+	int branch = 0;
+
+	switch (cond) {
+		case 0x00000000: { //equal
+			//printf("executing beq...\n");
+			//if Z = 1,
+			if(CURRENT_STATE.FLAG_Z == 1)
+				branch = 1;
+		} break;
+		case 0x00000001: { // not equal
+			//printf("executing bne...\n");
+			if( CURRENT_STATE.FLAG_Z == 0)
+				branch = 1;
+		} break;
+		case 0x0000000A: { // greater than or equal
+			//printf("executing bge...\n");
+			if(CURRENT_STATE.FLAG_N == 0)
+				branch = 1;
+		} break;
+		case 0x0000000B: { // less than
+			//printf("executing bl...\n");
+			if(CURRENT_STATE.FLAG_N == 1)
+				branch = 1;
+		} break;
+		case 0x0000000C: {//greater than
+			//printf("executing bg...\n");
+			if(CURRENT_STATE.FLAG_Z == 0 && CURRENT_STATE.FLAG_N == 0)
+				branch = 1;
+		} break;
+		case 0x0000000D: {//less than or equal to
+			//printf("executing ble...\n");
+			if(!(CURRENT_STATE.FLAG_Z == 0 && CURRENT_STATE.FLAG_N == 0))
+				branch = 1;
+		} break;
+	}
+
+	if(branch){
+		EXtoMEM.branch = true;
+		//printf("branching...\n");
+		CURRENT_STATE.PC = CURRENT_STATE.PC - 4 + addr;
+	}
+	else{
+		//printf("not branching...\n");
+		EXtoMEM.branch = false;
+		//NEXT_STATE.PC = CURRENT_STATE.PC + 4;
+	}
+}
+
+void STURx_MEM(uint64_t start_addr, int nbits, int64_t val){
+
+	if(nbits == 64){
+		mem_write_32(start_addr, (uint32_t)(val & 0xFFFFFFFF));
+		mem_write_32(start_addr+4, (uint32_t)((val >> 32) & 0xFFFFFFFF));
+	}
+	else if(nbits == 16){
+		mem_write_32(start_addr, (uint32_t)(val & 0xFFFFFFFF));
+	}
+	else{ // bits = 8
+		mem_write_32(start_addr, (uint32_t)(val & 0xFFFFFFFF));
+	}
+
+}
+
+int64_t LDURx_MEM(uint64_t start_addr, int nbits){
+
+	if(nbits == 64){
+		//printf("calling ldur\n");
+		uint64_t lower32 = (uint64_t)mem_read_32(start_addr);
+		//should this be not 32, but 4?)
+		uint64_t upper32 = (uint64_t)mem_read_32(start_addr + 4);
+		//printf("upper 32: %16lx \n", upper32);
+		//printf("lower 32: %16lx \n", lower32);
+		return (upper32 << 32) + (lower32);
+	}
+	else if(nbits == 16){
+		//printf("calling ldurh\n");
+		uint64_t val = (uint64_t)mem_read_32(start_addr);
+		uint64_t temp = val & 0xFFFF;
+			//printf("set reg %ld", temp);
+		return val & 0xFFFF; // gets bottom 16 bits
+	}
+	else { // nbits = 8
+		//printf("calling ldurb\n");
+		uint64_t val = (uint64_t)mem_read_32(start_addr);
+		return val & 0xFF; // gets bottom 8 bits
+	}
+
+}
 
 
 // Execution implementation
@@ -220,8 +449,10 @@ void execute(char instr_type, int fields[])
     case 'R': {
       //printf("case R\n");
 		EXtoMEM.mem_address = 0;
+		EXtoMEM.nbits = 0;
 		EXtoMEM.branch = false; //NOTE: will need to be reset in BR
 		EXtoMEM.mem_read = false;
+		EXtoMEM.mem_write = false;
 		EXtoMEM.reg_write = true; //NOTE: will need to be reset in BR
 		EXtoMEM.mem_to_reg = false;		
       switch(fields[0]) {
@@ -269,8 +500,10 @@ void execute(char instr_type, int fields[])
     case 'I': {
       //printf("case I\n");
 		EXtoMEM.mem_address = 0;
+		EXtoMEM.nbits = 0;
 		EXtoMEM.branch = false;
 		EXtoMEM.mem_read = false;
+		EXtoMEM.mem_write = false;
 		EXtoMEM.reg_write = true;
 		EXtoMEM.mem_to_reg = false;
       switch(fields[0]) {
@@ -301,7 +534,7 @@ void execute(char instr_type, int fields[])
       //NEXT_STATE.PC = CURRENT_STATE.PC + 4;
     } break;
     case 'D': {
-      //printf("case D\n");
+		EXtoMEM.branch = false;
       switch(fields[0]) {
 
         case 0x7C0: { // STUR
@@ -334,6 +567,13 @@ void execute(char instr_type, int fields[])
       //NEXT_STATE.PC = CURRENT_STATE.PC + 4;
     } break;
     case 'C': {
+		EXtoMEM.result = 0;
+		EXtoMEM.dest_register = 0;
+		EXtoMEM.mem_address = 0;
+		EXtoMEM.mem_read = false;
+		EXtoMEM.mem_write = false;
+		EXtoMEM.reg_write = false;
+		EXtoMEM.mem_to_reg = false;
       switch (fields[0]) {
         case 0xB5: { //CBNZ
           CBNZ(fields);
@@ -348,6 +588,14 @@ void execute(char instr_type, int fields[])
       }
     } break;
     case 'B': {
+		EXtoMEM.branch = true;
+		EXtoMEM.result = 0;
+		EXtoMEM.dest_register = 0;
+		EXtoMEM.mem_address = 0;
+		EXtoMEM.mem_read = false;
+		EXtoMEM.mem_write = false;
+		EXtoMEM.reg_write = false;
+		EXtoMEM.mem_to_reg = false;
       //call function (immediate branching)
       //printf("immediate branching...\n");
       BRANCH_IMM(fields);
@@ -465,6 +713,8 @@ void D_decoder(int instruct_no)
 
 void B_decoder(int instruct_no){
 
+	//TODO: STALLLLLLLLL
+
 	//nonconditional immediate branching if 6 bit opcode is 0x05
 	if ((((unsigned) instruct_no) >> 26) == 0x00000005) {
 		int br_addr = instruct_no & 0x03FFFFFF;
@@ -560,10 +810,26 @@ void decode(int instruct_no)
 
 void pipe_stage_wb()
 {
+	if(MEMtoWB.reg_write) {
+		CURRENT_STATE.REGS[MEMtoWB.dest_register] = MEMtoWB.result;
+	}
 }
 
 void pipe_stage_mem()
 {
+	MEMtoWB.result = EXtoMEM.result;
+	MEMtoWB.dest_register = EXtoMEM.dest_register;
+	MEMtoWB.reg_write = EXtoMEM.reg_write;
+	MEMtoWB.mem_to_reg = EXtoMEM.mem_to_reg;
+
+	if(EXtoMEM.mem_read){
+		MEMtoWB.result = LDURx_MEM(EXtoMEM.mem_address, EXtoMEM.nbits);	
+	} else if(EXtoMEM.mem_write){
+		STURx_MEM(EXtoMEM.mem_address, EXtoMEM.nbits, EXtoMEM.result);
+	} else{
+		return;
+	}
+
 }
 
 void pipe_stage_execute()
