@@ -91,7 +91,10 @@ void ADDx(char instr_type, int set_flag, int fields[]){
 		temp = fields[1] + CURRENT_STATE.REGS[fields[2]];
 		EXtoMEM.dest_register = fields[3];
 	}
+	
 	EXtoMEM.result = temp;
+	printf("ADDx result: %16lx\n", EXtoMEM.result);
+	printf("ADDx dest reg: %d\n", EXtoMEM.dest_register);
 
 	//TODO: still set flags in current state?
 	if(set_flag){
@@ -432,6 +435,8 @@ void STURx_MEM(uint64_t start_addr, int nbits, int64_t val){
 }
 
 int64_t LDURx_MEM(uint64_t start_addr, int nbits){
+
+	printf("LDURx_MEM\n");
 
 	if(nbits == 64){
 		//printf("calling ldur\n");
@@ -777,6 +782,7 @@ void decode(int instruct_no)
 		//printf("HLT command detected");
 		IDtoEX.HALT_FLAG = 1;
 		IF_STALL = true;
+		CURRENT_STATE.PC +=4;
 		return;
 	}
 
@@ -829,6 +835,7 @@ void decode(int instruct_no)
 void pipe_stage_wb()
 {
 	if(!WB_STALL){
+		stat_inst_retire++;
 		if(MEMtoWB.HALT_FLAG){
 			RUN_BIT = 0;
 			return;
@@ -836,8 +843,14 @@ void pipe_stage_wb()
 		CURRENT_STATE.FLAG_Z = MEMtoWB.FLAG_Z;
 		CURRENT_STATE.FLAG_N = MEMtoWB.FLAG_N;
 		if(MEMtoWB.reg_write) {
+			printf("WB result: %16lx\n", MEMtoWB.result);
+			printf("WB dest reg: %d\n", MEMtoWB.dest_register);
 			CURRENT_STATE.REGS[MEMtoWB.dest_register] = MEMtoWB.result;
 		}
+	}
+	else{
+		printf("[STALLED] WB result: %16lx\n", MEMtoWB.result);
+		printf("[STALLED] WB dest reg: %d\n", MEMtoWB.dest_register);
 	}
 }
 
@@ -856,9 +869,9 @@ void pipe_stage_mem()
 			MEMtoWB.result = LDURx_MEM(EXtoMEM.mem_address, EXtoMEM.nbits);	
 		} else if(EXtoMEM.mem_write){
 			STURx_MEM(EXtoMEM.mem_address, EXtoMEM.nbits, EXtoMEM.result);
-		} else{
-			return;
 		}
+
+		printf("WB unstalled\n");
 		WB_STALL = false;
 	}
 	else {
@@ -866,6 +879,7 @@ void pipe_stage_mem()
 		MEMtoWB.dest_register = 0;
 		MEMtoWB.reg_write = 0;
 		MEMtoWB.mem_to_reg = 0;
+		printf("WB stalled\n");
 		WB_STALL = true;
 	}
 
@@ -877,6 +891,7 @@ void pipe_stage_execute()
 		EXtoMEM.HALT_FLAG = IDtoEX.HALT_FLAG;
 		int fields[] = {IDtoEX.fields1, IDtoEX.fields2, IDtoEX.fields3, IDtoEX.fields4, IDtoEX.fields5};
   		execute(IDtoEX.instr_type, fields);
+		printf("MEM unstalled\n");
 		MEM_STALL = false;
 	}
 	else{
@@ -889,6 +904,7 @@ void pipe_stage_execute()
  		EXtoMEM.mem_write = false;
  		EXtoMEM.reg_write = false;
  		EXtoMEM.mem_to_reg = false;
+		printf("MEM stalled\n");
 		MEM_STALL = true;
 	}
 }
@@ -897,6 +913,7 @@ void pipe_stage_decode()
 {
 	if(!ID_STALL){
   		decode(IFtoID.instruction);
+		printf("EX unstalled\n");
 		EX_STALL = false;
 	}
 	else{
@@ -906,6 +923,7 @@ void pipe_stage_decode()
 		IDtoEX.fields4 = 0;
 		IDtoEX.fields5 = 0;
 		IDtoEX.instr_type = '0';
+		printf("EX stalled\n");
 		EX_STALL = true;
 	}
 }
@@ -917,10 +935,12 @@ void pipe_stage_fetch()
 		//printf("%08x \n", temp);
 		IFtoID.instruction = temp;
  		CURRENT_STATE.PC += 4;
+		printf("ID unstalled\n");
 		ID_STALL = false;
 	}
 	else{
 		IFtoID.instruction = 0;
+		printf("ID stalled\n");
 		ID_STALL = true;
 	}
 }
