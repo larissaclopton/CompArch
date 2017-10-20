@@ -24,20 +24,28 @@ void pipe_init()
 
 
 typedef struct Pipe_Reg_IFtoID{
-  int instruction;
+	int instruction;
 } Pipe_Reg_IFtoID;
 
 static Pipe_Reg_IFtoID IFtoID;
 
 typedef struct Pipe_Reg_IDtoEX{
-  int fields[5];
-  char instr_type;
+	bool HALT_FLAG;
+	int fields1;
+	int fields2;
+	int fields3;
+	int fields4;
+	int fields5;
+ 	char instr_type;
 } Pipe_Reg_IDtoEX;
 
-static Pipe_Reg_IDtoEX IDtoEX;
+static Pipe_Reg_IDtoEX IDtoEX = {false, 0, 0, 0, 0, 0, '0'};
 
 typedef struct Pipe_Reg_EXtoMEM{
- 	int64_t result;
+	bool HALT_FLAG;
+	int FLAG_Z;
+	int FLAG_N;
+	int64_t result;
 	int dest_register;
 	uint64_t mem_address;
 	int nbits; // for STURx and LDURx
@@ -48,16 +56,25 @@ typedef struct Pipe_Reg_EXtoMEM{
  	bool mem_to_reg;
 } Pipe_Reg_EXtoMEM;
 
-static Pipe_Reg_EXtoMEM EXtoMEM;
+static Pipe_Reg_EXtoMEM EXtoMEM = {false, 0, 0, 0, 0, 0, 0, false, false, false, false, false};
 
 typedef struct Pipe_Reg_MEMtoWB{
+	bool HALT_FLAG;	
+	int FLAG_Z;
+	int FLAG_N;
 	int64_t result;
 	int dest_register;
 	bool reg_write;
 	bool mem_to_reg;
 } Pipe_Reg_MEMtoWB;
 
-static Pipe_Reg_MEMtoWB MEMtoWB;
+static Pipe_Reg_MEMtoWB MEMtoWB = {false, 0, 0, 0, 0, false, false};
+
+bool IF_STALL = false;
+bool ID_STALL = true;
+bool EX_STALL = true;
+bool MEM_STALL = true;
+bool WB_STALL = true;
 
 // Function implementations
 
@@ -79,14 +96,14 @@ void ADDx(char instr_type, int set_flag, int fields[]){
 	//TODO: still set flags in current state?
 	if(set_flag){
 		if(temp < CURRENT_STATE.REGS[31])
-                        CURRENT_STATE.FLAG_N = 1;
+                        EXtoMEM.FLAG_N = 1;
                 else
-                        CURRENT_STATE.FLAG_N = 0;
+                        EXtoMEM.FLAG_N = 0;
 
                 if(temp == CURRENT_STATE.REGS[31])
-                        CURRENT_STATE.FLAG_Z = 1;
+                        EXtoMEM.FLAG_Z = 1;
                 else
-                        CURRENT_STATE.FLAG_Z = 0;
+                        EXtoMEM.FLAG_Z = 0;
 	}
 }
 
@@ -108,14 +125,14 @@ void SUBx(char instr_type, int set_flag, int fields[]){
 	//TODO: still set flags in current state?	
 	if(set_flag){
 		if(temp < CURRENT_STATE.REGS[31])
-    	CURRENT_STATE.FLAG_N = 1;
+    	EXtoMEM.FLAG_N = 1;
     else
-      CURRENT_STATE.FLAG_N = 0;
+      EXtoMEM.FLAG_N = 0;
 
     if(temp == CURRENT_STATE.REGS[31])
-      CURRENT_STATE.FLAG_Z = 1;
+      EXtoMEM.FLAG_Z = 1;
     else
-    	CURRENT_STATE.FLAG_Z = 0;
+    	EXtoMEM.FLAG_Z = 0;
 
 			//set 0-register to 0
 			CURRENT_STATE.REGS[31] = 0;
@@ -131,14 +148,14 @@ void ANDx(int set_flag, int fields[]) {
 	//TODO: still set flags in current state?
 	if(set_flag){
 		if(temp < CURRENT_STATE.REGS[31])
-			CURRENT_STATE.FLAG_N = 1;
+			EXtoMEM.FLAG_N = 1;
 		else
-			CURRENT_STATE.FLAG_N = 0;
+			EXtoMEM.FLAG_N = 0;
 
 		if(temp == CURRENT_STATE.REGS[31])
-			CURRENT_STATE.FLAG_Z = 1;
+			EXtoMEM.FLAG_Z = 1;
 		else
-			CURRENT_STATE.FLAG_Z = 0;
+			EXtoMEM.FLAG_Z = 0;
 	}
 }
 
@@ -357,32 +374,32 @@ void B_COND(int fields[]){
 		case 0x00000000: { //equal
 			//printf("executing beq...\n");
 			//if Z = 1,
-			if(CURRENT_STATE.FLAG_Z == 1)
+			if(EXtoMEM.FLAG_Z == 1)
 				branch = 1;
 		} break;
 		case 0x00000001: { // not equal
 			//printf("executing bne...\n");
-			if( CURRENT_STATE.FLAG_Z == 0)
+			if(EXtoMEM.FLAG_Z == 0)
 				branch = 1;
 		} break;
 		case 0x0000000A: { // greater than or equal
 			//printf("executing bge...\n");
-			if(CURRENT_STATE.FLAG_N == 0)
+			if(EXtoMEM.FLAG_N == 0)
 				branch = 1;
 		} break;
 		case 0x0000000B: { // less than
 			//printf("executing bl...\n");
-			if(CURRENT_STATE.FLAG_N == 1)
+			if(EXtoMEM.FLAG_N == 1)
 				branch = 1;
 		} break;
 		case 0x0000000C: {//greater than
 			//printf("executing bg...\n");
-			if(CURRENT_STATE.FLAG_Z == 0 && CURRENT_STATE.FLAG_N == 0)
+			if(EXtoMEM.FLAG_Z == 0 && EXtoMEM.FLAG_N == 0)
 				branch = 1;
 		} break;
 		case 0x0000000D: {//less than or equal to
 			//printf("executing ble...\n");
-			if(!(CURRENT_STATE.FLAG_Z == 0 && CURRENT_STATE.FLAG_N == 0))
+			if(!(EXtoMEM.FLAG_Z == 0 && EXtoMEM.FLAG_N == 0))
 				branch = 1;
 		} break;
 	}
@@ -629,11 +646,11 @@ void R_decoder(int instruct_no)
 	if (((unsigned)opcode) >> 1 == 0x0000034D)
 		opcode = 0x0000034D;
 
-	IDtoEX.fields[0] = opcode;
- 	IDtoEX.fields[1] = Rm;
- 	IDtoEX.fields[2] = shamt;
- 	IDtoEX.fields[3] = Rn;
- 	IDtoEX.fields[4] = Rd;
+	IDtoEX.fields1 = opcode;
+ 	IDtoEX.fields2 = Rm;
+ 	IDtoEX.fields3 = shamt;
+ 	IDtoEX.fields4 = Rn;
+ 	IDtoEX.fields5 = Rd;
 
 	//int i;
 	//for(i = 0; i < 5; i++){
@@ -646,7 +663,7 @@ void I_decoder(int instruct_no)
 {
 
 	int five_bit_mask = 0x0000001F;
-	int fields[5];
+	//int fields[5];
 
 	//special case for MOVZ
 	if((unsigned)instruct_no >> 23 == 0x000001A5){
@@ -658,11 +675,11 @@ void I_decoder(int instruct_no)
 		instruct_no >>= 2;
 		int opcode = instruct_no & 0x000001FF;
 
-		IDtoEX.fields[0] = opcode;
-		IDtoEX.fields[1] = op2;
-		IDtoEX.fields[2] = imm;
-		IDtoEX.fields[3] = Rd;
-   	IDtoEX.fields[4] = 0;
+		IDtoEX.fields1 = opcode;
+		IDtoEX.fields2 = op2;
+		IDtoEX.fields3 = imm;
+		IDtoEX.fields4 = Rd;
+   	IDtoEX.fields5 = 0;
 	}
 	else{
 		int Rd = instruct_no & five_bit_mask;
@@ -673,11 +690,11 @@ void I_decoder(int instruct_no)
 		instruct_no >>= 12;
 		int opcode = instruct_no & 0x000003FF;
 
-		IDtoEX.fields[0] = opcode;
-		IDtoEX.fields[1] = immediate;
-		IDtoEX.fields[2] = Rn;
-		IDtoEX.fields[3] = Rd;
-   	IDtoEX.fields[4] = 0;
+		IDtoEX.fields1 = opcode;
+		IDtoEX.fields2 = immediate;
+		IDtoEX.fields3 = Rn;
+		IDtoEX.fields4 = Rd;
+   	IDtoEX.fields5 = 0;
 
 		//int i;
 		//for(i = 0; i < 4; i++){
@@ -702,11 +719,11 @@ void D_decoder(int instruct_no)
 	instruct_no >>= 9;
 	int opcode = instruct_no & 0x000007FF;
 
-	IDtoEX.fields[0] = opcode;
- 	IDtoEX.fields[1] = offset;
- 	IDtoEX.fields[2] = op2;
- 	IDtoEX.fields[3] = Rn;
- 	IDtoEX.fields[4] = Rt;
+	IDtoEX.fields1 = opcode;
+ 	IDtoEX.fields2 = offset;
+ 	IDtoEX.fields3 = op2;
+ 	IDtoEX.fields4 = Rn;
+ 	IDtoEX.fields5 = Rt;
 
  	IDtoEX.instr_type = 'D';
 }
@@ -720,11 +737,11 @@ void B_decoder(int instruct_no){
 		int br_addr = instruct_no & 0x03FFFFFF;
 		int opcode = ((unsigned)instruct_no) >> 26;
 
-		IDtoEX.fields[0] = opcode;
-   	IDtoEX.fields[1] = br_addr;
-   	IDtoEX.fields[2] = 0;
-   	IDtoEX.fields[3] = 0;
-   	IDtoEX.fields[4] = 0;
+		IDtoEX.fields1 = opcode;
+   	IDtoEX.fields2 = br_addr;
+   	IDtoEX.fields3 = 0;
+   	IDtoEX.fields4 = 0;
+   	IDtoEX.fields5 = 0;
 
     	IDtoEX.instr_type = 'B';
 	}
@@ -741,11 +758,11 @@ void B_decoder(int instruct_no){
 		instruct_no >>= 19;
 		int opcode = instruct_no & 0x000000FF;
 
-		IDtoEX.fields[0] = opcode;
-    	IDtoEX.fields[1] = br_addr;
-    	IDtoEX.fields[2] = Rt;
-    	IDtoEX.fields[3] = 0;
-    	IDtoEX.fields[4] = 0;
+		IDtoEX.fields1 = opcode;
+    	IDtoEX.fields2 = br_addr;
+    	IDtoEX.fields3 = Rt;
+    	IDtoEX.fields4 = 0;
+    	IDtoEX.fields5 = 0;
 
     	IDtoEX.instr_type = 'C';
 	}
@@ -758,7 +775,8 @@ void decode(int instruct_no)
 	//unique commands
 	if(instruct_no == 0xd4400000){ // HLT
 		//printf("HLT command detected");
-		RUN_BIT = 0;
+		IDtoEX.HALT_FLAG = 1;
+		IF_STALL = true;
 		return;
 	}
 
@@ -810,44 +828,101 @@ void decode(int instruct_no)
 
 void pipe_stage_wb()
 {
-	if(MEMtoWB.reg_write) {
-		CURRENT_STATE.REGS[MEMtoWB.dest_register] = MEMtoWB.result;
+	if(!WB_STALL){
+		if(MEMtoWB.HALT_FLAG){
+			RUN_BIT = 0;
+			return;
+		}
+		CURRENT_STATE.FLAG_Z = MEMtoWB.FLAG_Z;
+		CURRENT_STATE.FLAG_N = MEMtoWB.FLAG_N;
+		if(MEMtoWB.reg_write) {
+			CURRENT_STATE.REGS[MEMtoWB.dest_register] = MEMtoWB.result;
+		}
 	}
 }
 
 void pipe_stage_mem()
 {
-	MEMtoWB.result = EXtoMEM.result;
-	MEMtoWB.dest_register = EXtoMEM.dest_register;
-	MEMtoWB.reg_write = EXtoMEM.reg_write;
-	MEMtoWB.mem_to_reg = EXtoMEM.mem_to_reg;
+	if(!MEM_STALL){
+		MEMtoWB.HALT_FLAG = EXtoMEM.HALT_FLAG;
+		MEMtoWB.FLAG_Z = EXtoMEM.FLAG_Z;
+		MEMtoWB.FLAG_N = EXtoMEM.FLAG_N;
+		MEMtoWB.result = EXtoMEM.result;
+		MEMtoWB.dest_register = EXtoMEM.dest_register;
+		MEMtoWB.reg_write = EXtoMEM.reg_write;
+		MEMtoWB.mem_to_reg = EXtoMEM.mem_to_reg;
 
-	if(EXtoMEM.mem_read){
-		MEMtoWB.result = LDURx_MEM(EXtoMEM.mem_address, EXtoMEM.nbits);	
-	} else if(EXtoMEM.mem_write){
-		STURx_MEM(EXtoMEM.mem_address, EXtoMEM.nbits, EXtoMEM.result);
-	} else{
-		return;
+		if(EXtoMEM.mem_read){
+			MEMtoWB.result = LDURx_MEM(EXtoMEM.mem_address, EXtoMEM.nbits);	
+		} else if(EXtoMEM.mem_write){
+			STURx_MEM(EXtoMEM.mem_address, EXtoMEM.nbits, EXtoMEM.result);
+		} else{
+			return;
+		}
+		WB_STALL = false;
+	}
+	else {
+		MEMtoWB.result = 0;
+		MEMtoWB.dest_register = 0;
+		MEMtoWB.reg_write = 0;
+		MEMtoWB.mem_to_reg = 0;
+		WB_STALL = true;
 	}
 
 }
 
 void pipe_stage_execute()
 {
-  execute(IDtoEX.instr_type, IDtoEX.fields);
+	if(!EX_STALL){
+		EXtoMEM.HALT_FLAG = IDtoEX.HALT_FLAG;
+		int fields[] = {IDtoEX.fields1, IDtoEX.fields2, IDtoEX.fields3, IDtoEX.fields4, IDtoEX.fields5};
+  		execute(IDtoEX.instr_type, fields);
+		MEM_STALL = false;
+	}
+	else{
+		EXtoMEM.result = 0;
+		EXtoMEM.dest_register = 0;
+		EXtoMEM.mem_address = 0;
+		EXtoMEM.nbits = 0; // for STURx and LDURx
+ 		EXtoMEM.branch = false;
+ 		EXtoMEM.mem_read = false;
+ 		EXtoMEM.mem_write = false;
+ 		EXtoMEM.reg_write = false;
+ 		EXtoMEM.mem_to_reg = false;
+		MEM_STALL = true;
+	}
 }
 
 void pipe_stage_decode()
 {
-  decode(IFtoID.instruction);
+	if(!ID_STALL){
+  		decode(IFtoID.instruction);
+		EX_STALL = false;
+	}
+	else{
+		IDtoEX.fields1 = 0;
+		IDtoEX.fields2 = 0;
+		IDtoEX.fields3 = 0;
+		IDtoEX.fields4 = 0;
+		IDtoEX.fields5 = 0;
+		IDtoEX.instr_type = '0';
+		EX_STALL = true;
+	}
 }
 
 void pipe_stage_fetch()
 {
- 	uint32_t temp = mem_read_32(CURRENT_STATE.PC);
-	//printf("%08x \n", temp);
-	IFtoID.instruction = temp;
- 	CURRENT_STATE.PC += 4;
+	if(!IF_STALL){
+ 		uint32_t temp = mem_read_32(CURRENT_STATE.PC);
+		//printf("%08x \n", temp);
+		IFtoID.instruction = temp;
+ 		CURRENT_STATE.PC += 4;
+		ID_STALL = false;
+	}
+	else{
+		IFtoID.instruction = 0;
+		ID_STALL = true;
+	}
 }
 
 void pipe_cycle()
