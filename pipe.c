@@ -130,7 +130,7 @@ int64_t* forward(int regs[], int len){
 	int i;
 	for(i = 0; i < len; i++){
   		if(EXtoMEM.mem_read){
-    		if(EXtoMEM.dest_register == reg[i]){
+    		if(EXtoMEM.dest_register == regs[i]){
       			stall = 1; //temp flag so we know not to use the return value
 				res[i] = 0;
     		}
@@ -319,8 +319,9 @@ void LSx(int fields[]){
 	int left_shift = right_shift | mask;
 	left_shift = (~left_shift) + 1;
 
-	//TODO: check if register is waiting to be written
-	uint64_t val = (uint64_t)forward(fields[2]);
+	int regs[] = {fields[2]};
+	int64_t *res = forward(regs,1);	
+	uint64_t val = (uint64_t)res[0];
 
 	if(shamt == 0x3F){
 		val >>= right_shift;
@@ -342,10 +343,10 @@ void STURx(int nbits, int fields[]){
 	EXtoMEM.reg_write = false;
 	EXtoMEM.mem_to_reg = false;
 
-	//TODO: check if register is waiting to be written
-	uint64_t start_addr = forward(fields[3]) + fields[1];
-	//TODO: check if register is waiting to be written
-	int64_t val = forward(fields[4]);
+	int regs[] = {fields[3], fields[4]};
+	int64_t *res = forward(regs, 2);
+	uint64_t start_addr = (uint64_t)(res[0] + fields[1]);
+	int64_t val = res[1];
 	int64_t result;
 	if(nbits == 64){
 		result = val;
@@ -353,7 +354,6 @@ void STURx(int nbits, int fields[]){
 		//mem_write_32(start_addr+4, (uint32_t)((val >> 32) & 0xFFFFFFFF));
 	}
 	else if(nbits == 16){
-		//TODO: check if memory is waiting to be written
 		uint32_t mem = mem_read_32(start_addr);
 		int mask_16 = 0xFFFF << 16;
 		mem = mem & mask_16;
@@ -361,10 +361,8 @@ void STURx(int nbits, int fields[]){
 		uint32_t val2 = (uint32_t)val & 0xFFFF;
 		mem = mem + val2;
 		result = (int64_t)mem;
-		//mem_write_32(start_addr, mem);
 	}
 	else{ // bits = 8
-		//TODO: check if memory is waiting to be written
 		uint32_t mem = mem_read_32(start_addr);
 		int mask_24 = 0xFFFFFF << 8;
 		mem = mem & mask_24;
@@ -372,7 +370,6 @@ void STURx(int nbits, int fields[]){
 		uint32_t val2 = (uint32_t)val & 0xFF;
 		mem = mem + val2;
 		result = (int64_t)mem;
-		//mem_write_32(start_addr, mem);
 	}
 
 	EXtoMEM.mem_address = start_addr;
@@ -389,8 +386,9 @@ void LDURx(int nbits, int fields[]){
 	EXtoMEM.mem_to_reg = true;
 	EXtoMEM.reg_write = true;
 
-	//TODO: check whether register is waiting to be written
-	uint64_t start_addr = forward(fields[3]) + fields[1];
+	int regs[] = {fields[3]};
+	int64_t *res = forward(regs, 1);
+	uint64_t start_addr = (uint64_t)(res[0] + fields[1]);
 	//printf("load start addr: %08lx\n", start_addr);
 	//printf("load start addr+32: %08lx\n", start_addr + 4);
 
@@ -416,8 +414,9 @@ void CBNZ(int fields[]){
 
 	int64_t addr = (((((int64_t)fields[1]) << 45 ) >> 45) << 2);
 
-	//TODO: check if register is waiting to be written
-	if(forward(fields[2]) != CURRENT_STATE.REGS[31]) {
+	int regs[] = {fields[2]};
+	int64_t *res = forward(regs, 1);
+	if(res[0] != CURRENT_STATE.REGS[31]) {
 		EXtoMEM.branch = true;
 		CURRENT_STATE.PC = CURRENT_STATE.PC - 4 + addr;
 	}
@@ -435,8 +434,9 @@ void CBZ(int fields[]){
 	// could also call B
 	int64_t addr = (((((int64_t)fields[1]) << 45 ) >> 45) << 2);
 
-	//TODO: check if register is waiting to be written
-	if(forward(fields[2]) == CURRENT_STATE.REGS[31]) {
+	int regs[] = {fields[2]};
+	int64_t *res = forward(regs, 1);
+	if(res[0] == CURRENT_STATE.REGS[31]) {
 		EXtoMEM.branch = true;
 		CURRENT_STATE.PC = CURRENT_STATE.PC - 4 + addr;
 	}
