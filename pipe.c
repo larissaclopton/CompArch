@@ -59,7 +59,7 @@ typedef struct Pipe_Reg_EXtoMEM{
 static Pipe_Reg_EXtoMEM EXtoMEM = {false, 0, 0, 0, 0, 0, 0, false, false, false, false, false};
 
 typedef struct Pipe_Reg_MEMtoWB{
-	bool HALT_FLAG;	
+	bool HALT_FLAG;
 	int FLAG_Z;
 	int FLAG_N;
 	int64_t result;
@@ -70,43 +70,145 @@ typedef struct Pipe_Reg_MEMtoWB{
 
 static Pipe_Reg_MEMtoWB MEMtoWB = {false, 0, 0, 0, 0, false, false};
 
+bool IF_FLUSH = false;
+bool ID_FLUSH = true;
+bool EX_FLUSH = true;
+bool MEM_FLUSH = true;
+bool WB_FLUSH = true;
+
 bool IF_STALL = false;
-bool ID_STALL = true;
-bool EX_STALL = true;
-bool MEM_STALL = true;
-bool WB_STALL = true;
+bool ID_STALL = false;
+bool EX_STALL = false;
+bool MEM_STALL = false;
+bool WB_STALL = false;
+
+
+void IF_bubble(){
+	IFtoID.instruction = 0;
+	ID_FLUSH = true;
+}
+
+void ID_bubble(){
+	IDtoEX.fields1 = 0;
+  	IDtoEX.fields2 = 0;
+  	IDtoEX.fields3 = 0;
+  	IDtoEX.fields4 = 0;
+  	IDtoEX.fields5 = 0;
+  	IDtoEX.instr_type = '0';
+  	printf("EX FLUSHed\n");
+  	EX_FLUSH = true;
+}
+
+void EX_bubble(){	
+    EXtoMEM.result = 0;
+    EXtoMEM.dest_register = 0;
+    EXtoMEM.mem_address = 0;
+    EXtoMEM.nbits = 0; // for STURx and LDURx
+    EXtoMEM.branch = false;
+ 	EXtoMEM.mem_read = false;
+ 	EXtoMEM.mem_write = false;
+ 	EXtoMEM.reg_write = false;
+ 	EXtoMEM.mem_to_reg = false;
+	printf("MEM FLUSHed\n");
+	MEM_FLUSH = true;
+}
+
+void MEM_bubble(){
+    MEMtoWB.result = 0;
+	MEMtoWB.dest_register = 0;
+	MEMtoWB.reg_write = 0;
+	MEMtoWB.mem_to_reg = 0;
+	printf("WB FLUSHed\n");
+	WB_FLUSH = true;
+}
+
+
+int64_t* forward(int regs[], int len){
+  	int64_t *res = (int64_t*)malloc(len*sizeof(int64_t));
+	int stall = 0;	
+
+	int i;
+	for(i = 0; i < len; i++){
+  		if(EXtoMEM.mem_read){
+    		if(EXtoMEM.dest_register == reg[i]){
+      			stall = 1; //temp flag so we know not to use the return value
+				res[i] = 0;
+    		}
+  		}
+
+  		if(EXtoMEM.reg_write){
+    		if(EXtoMEM.dest_register == reg){
+      			res[i] = EXtoMEM.result;
+    		}
+  		}
+
+  		if(MEMtoWB.reg_write){
+    		if(MEMtoWB.dest_register == reg){
+      			res[i] = MEMtoWB.result;
+    		}
+  		}
+
+  		res[i] = CURRENT_STATE.REGS[reg[i]];
+
+	}
+
+	if(stall){
+		IF_STALL = true;
+		ID_STALL = true;
+		EX_FLUSH = true;
+	}
+	else{
+		IF_STALL = false;
+		ID_STALL = false;
+		EX_FLUSH = false;
+	}
+
+	return res;
+}
+
 
 // Function implementations
 
 void ADDx(char instr_type, int set_flag, int fields[]){
-	int64_t temp;
-
+  int64_t tmp1, tmp2, ret;
+  bool f1, f2;
 	if(instr_type == 'R'){
-		// TODO: check if registers are waiting to be written
-		temp = CURRENT_STATE.REGS[fields[1]] + CURRENT_STATE.REGS[fields[3]];
-		EXtoMEM.dest_register = fields[4];
+		int regs[2] = {fields[1], fields[3]};
+		int res[2] = forward(regs, 2);
+
+		if(!EX_FLUSH){
+			EXtoMEM.result = res[0] + res[1];
+			EXtoMEM.dest_register = fields[4];
+		}
 	}
 	else{
-		//TODO: check if register is waiting to be written
-		temp = fields[1] + CURRENT_STATE.REGS[fields[2]];
-		EXtoMEM.dest_register = fields[3];
+		int regs[1] = {fields[2]};
+		int res[1] = forward(regs, 1);
+
+    	if(!EX_FLUSH){
+    		EXtoMEM.result = fields[1] + res[0];
+			EXtoMEM.dest_register = fields[3];
+		}
 	}
-	
-	EXtoMEM.result = temp;
-	printf("ADDx result: %16lx\n", EXtoMEM.result);
-	printf("ADDx dest reg: %d\n", EXtoMEM.dest_register);
 
-	//TODO: still set flags in current state?
+	//printf("ADDx result: %16lx\n", EXtoMEM.result);
+	//printf("ADDx dest reg: %d\n", EXtoMEM.dest_register);
+
+	if(EX_FLUSH){
+		EX_bubble();
+		set_flag = 0;
+	}	
+
 	if(set_flag){
-		if(temp < CURRENT_STATE.REGS[31])
-                        EXtoMEM.FLAG_N = 1;
-                else
-                        EXtoMEM.FLAG_N = 0;
+		if(EXtoMEM.result < CURRENT_STATE.REGS[31])
+     		EXtoMEM.FLAG_N = 1;
+    	else
+     		EXtoMEM.FLAG_N = 0;
 
-                if(temp == CURRENT_STATE.REGS[31])
-                        EXtoMEM.FLAG_Z = 1;
-                else
-                        EXtoMEM.FLAG_Z = 0;
+    	if(EXtoMEM.result == CURRENT_STATE.REGS[31])
+        	EXtoMEM.FLAG_Z = 1;
+    	else
+        	EXtoMEM.FLAG_Z = 0;
 	}
 }
 
@@ -115,17 +217,17 @@ void SUBx(char instr_type, int set_flag, int fields[]){
 
 	if(instr_type == 'R'){
 		//TODO: check if registers are waiting to be written
-		temp = CURRENT_STATE.REGS[fields[3]] - CURRENT_STATE.REGS[fields[1]];
+		temp = forward(fields[3]) - forward(fields[1]);
 		EXtoMEM.dest_register = fields[4];
 	}
 	else{
 		//TODO: check if register waiting to be written
-		temp = (int64_t)CURRENT_STATE.REGS[fields[2]] - (int64_t)fields[1];
+		temp = (int64_t)forward(fields[2]) - (int64_t)fields[1];
 		EXtoMEM.dest_register = fields[3];
 	}
 	EXtoMEM.result = temp;
 
-	//TODO: still set flags in current state?	
+	//TODO: still set flags in current state?
 	if(set_flag){
 		if(temp < CURRENT_STATE.REGS[31])
     	EXtoMEM.FLAG_N = 1;
@@ -144,7 +246,7 @@ void SUBx(char instr_type, int set_flag, int fields[]){
 
 void ANDx(int set_flag, int fields[]) {
 	//TODO: check if registers are waiting to be written
-	int64_t temp = CURRENT_STATE.REGS[fields[3]] & CURRENT_STATE.REGS[fields[1]];
+	int64_t temp = forward(fields[3]) & forward(fields[1]);
 	EXtoMEM.dest_register = fields[4];
 	EXtoMEM.result = temp;
 
@@ -164,21 +266,21 @@ void ANDx(int set_flag, int fields[]) {
 
 void MUL(int fields[]){
 	//TODO: check if registers are waiting to be written
-	int64_t temp = (CURRENT_STATE.REGS[fields[3]] * CURRENT_STATE.REGS[fields[1]]);
+	int64_t temp = (forward(fields[3]) * forward(fields[1]));
 	EXtoMEM.dest_register = fields[4];
 	EXtoMEM.result = temp;
 }
 
 void EOR(int fields[]){
 	//TODO: check if registers are waiting to be written
-	int64_t temp = CURRENT_STATE.REGS[fields[1]] ^ CURRENT_STATE.REGS[fields[3]];
+	int64_t temp = forward(fields[1]) ^ forward(fields[3]);
 	EXtoMEM.dest_register = fields[4];
 	EXtoMEM.result = temp;
 }
 
 void ORR(int fields[]){
 	//TODO: check if registers are waiting to be written
-	int64_t temp = CURRENT_STATE.REGS[fields[1]] | CURRENT_STATE.REGS[fields[3]];
+	int64_t temp = forward(fields[1]) | forward(fields[3]);
 	EXtoMEM.dest_register = fields[4];
 	EXtoMEM.result = temp;
 }
@@ -189,7 +291,7 @@ void BR(int fields[]){
 
 	//TODO: check if register is waiting to be written
 	//TODO: how to squash instructions already in pipeline?
-	CURRENT_STATE.PC = CURRENT_STATE.REGS[fields[3]];
+	CURRENT_STATE.PC = forward(fields[3]);
 }
 
 void MOVZ(int fields[]){
@@ -218,7 +320,7 @@ void LSx(int fields[]){
 	left_shift = (~left_shift) + 1;
 
 	//TODO: check if register is waiting to be written
-	uint64_t val = (uint64_t)CURRENT_STATE.REGS[fields[2]];
+	uint64_t val = (uint64_t)forward(fields[2]);
 
 	if(shamt == 0x3F){
 		val >>= right_shift;
@@ -241,9 +343,9 @@ void STURx(int nbits, int fields[]){
 	EXtoMEM.mem_to_reg = false;
 
 	//TODO: check if register is waiting to be written
-	uint64_t start_addr = CURRENT_STATE.REGS[fields[3]] + fields[1];
+	uint64_t start_addr = forward(fields[3]) + fields[1];
 	//TODO: check if register is waiting to be written
-	int64_t val = CURRENT_STATE.REGS[fields[4]];
+	int64_t val = forward(fields[4]);
 	int64_t result;
 	if(nbits == 64){
 		result = val;
@@ -286,32 +388,11 @@ void LDURx(int nbits, int fields[]){
 	EXtoMEM.mem_write = false;
 	EXtoMEM.mem_to_reg = true;
 	EXtoMEM.reg_write = true;
-	
+
 	//TODO: check whether register is waiting to be written
-	uint64_t start_addr = CURRENT_STATE.REGS[fields[3]] + fields[1];
+	uint64_t start_addr = forward(fields[3]) + fields[1];
 	//printf("load start addr: %08lx\n", start_addr);
 	//printf("load start addr+32: %08lx\n", start_addr + 4);
-	if(nbits == 64){
-		//printf("calling ldur\n");
-		//uint64_t lower32 = (uint64_t)mem_read_32(start_addr);
-		//should this be not 32, but 4?)
-		//uint64_t upper32 = (uint64_t)mem_read_32(start_addr + 4);
-		//printf("upper 32: %16lx \n", upper32);
-		//printf("lower 32: %16lx \n", lower32);
-		//NEXT_STATE.REGS[fields[4]] = (upper32 << 32) + (lower32);
-	}
-	else if(nbits == 16){
-		//printf("calling ldurh\n");
-		//uint64_t val = (uint64_t)mem_read_32(start_addr);
-			//uint64_t temp = val & 0xFFFF;
-			//printf("set reg %ld", temp);
-			//NEXT_STATE.REGS[fields[4]] = val & 0xFFFF; // gets bottom 16 bits
-	}
-	else { // nbits = 8
-		//printf("calling ldurb\n");
-		//uint64_t val = (uint64_t)mem_read_32(start_addr);
-		//NEXT_STATE.REGS[fields[4]] = val & 0xFF; // gets bottom 8 bits
-	}
 
 	EXtoMEM.mem_address = start_addr;
 	EXtoMEM.nbits = nbits;
@@ -324,7 +405,7 @@ void BRANCH_IMM(int fields[]){
 	int64_t addr = (((((int64_t)fields[1]) << 38 ) >> 38) << 2);
 	CURRENT_STATE.PC = CURRENT_STATE.PC - 4 + addr;
 	//printf("bar addr: %016lx\n", NEXT_STATE.PC);
-	
+
 }
 
 void CBNZ(int fields[]){
@@ -336,7 +417,7 @@ void CBNZ(int fields[]){
 	int64_t addr = (((((int64_t)fields[1]) << 45 ) >> 45) << 2);
 
 	//TODO: check if register is waiting to be written
-	if(CURRENT_STATE.REGS[fields[2]] != CURRENT_STATE.REGS[31]) {
+	if(forward(fields[2]) != CURRENT_STATE.REGS[31]) {
 		EXtoMEM.branch = true;
 		CURRENT_STATE.PC = CURRENT_STATE.PC - 4 + addr;
 	}
@@ -355,7 +436,7 @@ void CBZ(int fields[]){
 	int64_t addr = (((((int64_t)fields[1]) << 45 ) >> 45) << 2);
 
 	//TODO: check if register is waiting to be written
-	if(CURRENT_STATE.REGS[fields[2]] == CURRENT_STATE.REGS[31]) {
+	if(forward(fields[2]) == CURRENT_STATE.REGS[31]) {
 		EXtoMEM.branch = true;
 		CURRENT_STATE.PC = CURRENT_STATE.PC - 4 + addr;
 	}
@@ -476,7 +557,7 @@ void execute(char instr_type, int fields[])
 		EXtoMEM.mem_read = false;
 		EXtoMEM.mem_write = false;
 		EXtoMEM.reg_write = true; //NOTE: will need to be reset in BR
-		EXtoMEM.mem_to_reg = false;		
+		EXtoMEM.mem_to_reg = false;
       switch(fields[0]) {
 
               case 0x459: // ADD extended format treated as ADD
@@ -735,7 +816,7 @@ void D_decoder(int instruct_no)
 
 void B_decoder(int instruct_no){
 
-	//TODO: STALLLLLLLLL
+	//TODO: FLUSHLLLLLLL
 
 	//nonconditional immediate branching if 6 bit opcode is 0x05
 	if ((((unsigned) instruct_no) >> 26) == 0x00000005) {
@@ -781,7 +862,7 @@ void decode(int instruct_no)
 	if(instruct_no == 0xd4400000){ // HLT
 		//printf("HLT command detected");
 		IDtoEX.HALT_FLAG = 1;
-		IF_STALL = true;
+		IF_FLUSH = true;
 		CURRENT_STATE.PC +=4;
 		return;
 	}
@@ -834,115 +915,100 @@ void decode(int instruct_no)
 
 void pipe_stage_wb()
 {
-	if(!WB_STALL){
-		stat_inst_retire++;
-		if(MEMtoWB.HALT_FLAG){
-			RUN_BIT = 0;
-			return;
-		}
-		CURRENT_STATE.FLAG_Z = MEMtoWB.FLAG_Z;
-		CURRENT_STATE.FLAG_N = MEMtoWB.FLAG_N;
-		if(MEMtoWB.reg_write) {
-			printf("WB result: %16lx\n", MEMtoWB.result);
-			printf("WB dest reg: %d\n", MEMtoWB.dest_register);
-			CURRENT_STATE.REGS[MEMtoWB.dest_register] = MEMtoWB.result;
-		}
-	}
-	else{
-		printf("[STALLED] WB result: %16lx\n", MEMtoWB.result);
-		printf("[STALLED] WB dest reg: %d\n", MEMtoWB.dest_register);
-	}
+  if(!WB_STALL){
+	  if(!WB_FLUSH){
+		  stat_inst_retire++;
+		  if(MEMtoWB.HALT_FLAG){
+			   RUN_BIT = 0;
+			   return;
+		  }
+		  CURRENT_STATE.FLAG_Z = MEMtoWB.FLAG_Z;
+		  CURRENT_STATE.FLAG_N = MEMtoWB.FLAG_N;
+		  if(MEMtoWB.reg_write) {
+			   printf("WB result: %16lx\n", MEMtoWB.result);
+			   printf("WB dest reg: %d\n", MEMtoWB.dest_register);
+			   CURRENT_STATE.REGS[MEMtoWB.dest_register] = MEMtoWB.result;
+	    }
+	  }
+	  else{
+		  printf("[FLUSHED] WB result: %16lx\n", MEMtoWB.result);
+		  printf("[FLUSHED] WB dest reg: %d\n", MEMtoWB.dest_register);
+	  }
+  }
 }
 
 void pipe_stage_mem()
 {
-	if(!MEM_STALL){
-		MEMtoWB.HALT_FLAG = EXtoMEM.HALT_FLAG;
-		MEMtoWB.FLAG_Z = EXtoMEM.FLAG_Z;
-		MEMtoWB.FLAG_N = EXtoMEM.FLAG_N;
-		MEMtoWB.result = EXtoMEM.result;
-		MEMtoWB.dest_register = EXtoMEM.dest_register;
-		MEMtoWB.reg_write = EXtoMEM.reg_write;
-		MEMtoWB.mem_to_reg = EXtoMEM.mem_to_reg;
+  if(!MEM_STALL){
+	  if(!MEM_FLUSH){
+		  MEMtoWB.HALT_FLAG = EXtoMEM.HALT_FLAG;
+		  MEMtoWB.FLAG_Z = EXtoMEM.FLAG_Z;
+		  MEMtoWB.FLAG_N = EXtoMEM.FLAG_N;
+		  MEMtoWB.result = EXtoMEM.result;
+		  MEMtoWB.dest_register = EXtoMEM.dest_register;
+		  MEMtoWB.reg_write = EXtoMEM.reg_write;
+		  MEMtoWB.mem_to_reg = EXtoMEM.mem_to_reg;
 
-		if(EXtoMEM.mem_read){
-			MEMtoWB.result = LDURx_MEM(EXtoMEM.mem_address, EXtoMEM.nbits);	
-		} else if(EXtoMEM.mem_write){
-			STURx_MEM(EXtoMEM.mem_address, EXtoMEM.nbits, EXtoMEM.result);
-		}
+		  if(EXtoMEM.mem_read){
+			   MEMtoWB.result = LDURx_MEM(EXtoMEM.mem_address, EXtoMEM.nbits);
+		  } else if(EXtoMEM.mem_write){
+			   STURx_MEM(EXtoMEM.mem_address, EXtoMEM.nbits, EXtoMEM.result);
+		  }
 
-		printf("WB unstalled\n");
-		WB_STALL = false;
-	}
-	else {
-		MEMtoWB.result = 0;
-		MEMtoWB.dest_register = 0;
-		MEMtoWB.reg_write = 0;
-		MEMtoWB.mem_to_reg = 0;
-		printf("WB stalled\n");
-		WB_STALL = true;
-	}
-
+		  printf("WB unFLUSHed\n");
+		  WB_FLUSH = false;
+	  }
+	  else {
+	  	  MEM_bubble();
+	  }
+  }
 }
 
 void pipe_stage_execute()
 {
-	if(!EX_STALL){
-		EXtoMEM.HALT_FLAG = IDtoEX.HALT_FLAG;
-		int fields[] = {IDtoEX.fields1, IDtoEX.fields2, IDtoEX.fields3, IDtoEX.fields4, IDtoEX.fields5};
-  		execute(IDtoEX.instr_type, fields);
-		printf("MEM unstalled\n");
-		MEM_STALL = false;
+  if(!EX_STALL){
+    if(!EX_FLUSH){
+      EXtoMEM.HALT_FLAG = IDtoEX.HALT_FLAG;
+      int fields[] = {IDtoEX.fields1, IDtoEX.fields2, IDtoEX.fields3, IDtoEX.fields4, IDtoEX.fields5};
+      execute(IDtoEX.instr_type, fields);
+      printf("MEM unFLUSHed\n");
+      MEM_FLUSH = false;
+    }
+    else{
+	  EX_bubble();
 	}
-	else{
-		EXtoMEM.result = 0;
-		EXtoMEM.dest_register = 0;
-		EXtoMEM.mem_address = 0;
-		EXtoMEM.nbits = 0; // for STURx and LDURx
- 		EXtoMEM.branch = false;
- 		EXtoMEM.mem_read = false;
- 		EXtoMEM.mem_write = false;
- 		EXtoMEM.reg_write = false;
- 		EXtoMEM.mem_to_reg = false;
-		printf("MEM stalled\n");
-		MEM_STALL = true;
-	}
+  }
 }
 
 void pipe_stage_decode()
 {
-	if(!ID_STALL){
-  		decode(IFtoID.instruction);
-		printf("EX unstalled\n");
-		EX_STALL = false;
-	}
-	else{
-		IDtoEX.fields1 = 0;
-		IDtoEX.fields2 = 0;
-		IDtoEX.fields3 = 0;
-		IDtoEX.fields4 = 0;
-		IDtoEX.fields5 = 0;
-		IDtoEX.instr_type = '0';
-		printf("EX stalled\n");
-		EX_STALL = true;
-	}
+  if(!ID_STALL){
+    if(!ID_FLUSH){
+      decode(IFtoID.instruction);
+	    printf("EX unFLUSHed\n");
+	    EX_FLUSH = false;
+	  }
+	  else{
+		  ID_bubble();
+	  }
+  }
 }
 
 void pipe_stage_fetch()
 {
-	if(!IF_STALL){
- 		uint32_t temp = mem_read_32(CURRENT_STATE.PC);
-		//printf("%08x \n", temp);
-		IFtoID.instruction = temp;
- 		CURRENT_STATE.PC += 4;
-		printf("ID unstalled\n");
-		ID_STALL = false;
-	}
-	else{
-		IFtoID.instruction = 0;
-		printf("ID stalled\n");
-		ID_STALL = true;
-	}
+  if(!IF_STALL){
+    if(!IF_FLUSH){
+ 		  uint32_t temp = mem_read_32(CURRENT_STATE.PC);
+		  //printf("%08x \n", temp);
+		  IFtoID.instruction = temp;
+ 		  CURRENT_STATE.PC += 4;
+		  printf("ID unFLUSHed\n");
+		  ID_FLUSH = false;
+	  }
+	  else{
+		  IF_bubble();
+	  }
+  }
 }
 
 void pipe_cycle()
