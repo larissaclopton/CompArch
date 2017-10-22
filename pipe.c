@@ -137,18 +137,18 @@ int64_t* forward(int regs[], int len){
   		}
 
   		if(EXtoMEM.reg_write){
-    		if(EXtoMEM.dest_register == reg){
+    		if(EXtoMEM.dest_register == regs[i]){
       			res[i] = EXtoMEM.result;
     		}
   		}
 
   		if(MEMtoWB.reg_write){
-    		if(MEMtoWB.dest_register == reg){
+    		if(MEMtoWB.dest_register == regs[i]){
       			res[i] = MEMtoWB.result;
     		}
   		}
 
-  		res[i] = CURRENT_STATE.REGS[reg[i]];
+  		res[i] = CURRENT_STATE.REGS[regs[i]];
 
 	}
 
@@ -211,7 +211,6 @@ void ADDx(char instr_type, int set_flag, int fields[]){
         	EXtoMEM.FLAG_Z = 0;
 	}
 
-	free(res);
 }
 
 void SUBx(char instr_type, int set_flag, int fields[]){
@@ -221,7 +220,7 @@ void SUBx(char instr_type, int set_flag, int fields[]){
 		int regs[2] = {fields[3], fields[1]};
 		int64_t *res = forward(regs, 2);
 		//TODO: check if registers are waiting to be written
-		EXtoMEM_result = res[0] - res[1];
+		EXtoMEM.result = res[0] - res[1];
 		EXtoMEM.dest_register = fields[4];
 	}
 	else{
@@ -253,7 +252,6 @@ void SUBx(char instr_type, int set_flag, int fields[]){
 			CURRENT_STATE.REGS[31] = 0;
 	}
 
-	free(res);
 }
 
 void ANDx(int set_flag, int fields[]) {
