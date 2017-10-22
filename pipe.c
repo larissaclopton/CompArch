@@ -86,6 +86,7 @@ bool WB_STALL = false;
 void IF_bubble(){
 	IFtoID.instruction = 0;
 	ID_FLUSH = true;
+ 	printf("IF bubble\n");
 }
 
 void ID_bubble(){
@@ -95,7 +96,7 @@ void ID_bubble(){
   	IDtoEX.fields4 = 0;
   	IDtoEX.fields5 = 0;
   	IDtoEX.instr_type = '0';
-  	printf("EX FLUSHed\n");
+  	printf("ID bubble\n");
   	EX_FLUSH = true;
 }
 
@@ -109,7 +110,7 @@ void EX_bubble(){
  	EXtoMEM.mem_write = false;
  	EXtoMEM.reg_write = false;
  	EXtoMEM.mem_to_reg = false;
-	printf("MEM FLUSHed\n");
+	printf("MEM bubble\n");
 	MEM_FLUSH = true;
 }
 
@@ -118,7 +119,7 @@ void MEM_bubble(){
 	MEMtoWB.dest_register = 0;
 	MEMtoWB.reg_write = 0;
 	MEMtoWB.mem_to_reg = 0;
-	printf("WB FLUSHed\n");
+	printf("WB bubble\n");
 	WB_FLUSH = true;
 }
 
@@ -133,31 +134,36 @@ int64_t* forward(int regs[], int len){
     		if(EXtoMEM.dest_register == regs[i]){
       			stall = 1; //temp flag so we know not to use the return value
 				res[i] = 0;
+				continue;
     		}
   		}
 
   		if(EXtoMEM.reg_write){
     		if(EXtoMEM.dest_register == regs[i]){
       			res[i] = EXtoMEM.result;
+				continue;
     		}
   		}
 
   		if(MEMtoWB.reg_write){
     		if(MEMtoWB.dest_register == regs[i]){
       			res[i] = MEMtoWB.result;
+				continue;
     		}
   		}
-
+		
   		res[i] = CURRENT_STATE.REGS[regs[i]];
 
 	}
 
 	if(stall){
+		printf("forward decides to stall\n");
 		IF_STALL = true;
 		ID_STALL = true;
 		EX_FLUSH = true;
 	}
 	else{
+		printf("forward decides NOT to stall\n");
 		IF_STALL = false;
 		ID_STALL = false;
 		EX_FLUSH = false;
@@ -170,6 +176,7 @@ int64_t* forward(int regs[], int len){
 // Function implementations
 
 void ADDx(char instr_type, int set_flag, int fields[]){
+	printf("executing ADDx\n");
   int64_t tmp1, tmp2, ret;
   bool f1, f2;
 	if(instr_type == 'R'){
@@ -195,8 +202,9 @@ void ADDx(char instr_type, int set_flag, int fields[]){
 	//printf("ADDx dest reg: %d\n", EXtoMEM.dest_register);
 
 	if(EX_FLUSH){
+		printf("ADDx bubble\n");
 		EX_bubble();
-		set_flag = 0;
+		return;
 	}	
 
 	if(set_flag){
@@ -211,6 +219,14 @@ void ADDx(char instr_type, int set_flag, int fields[]){
         	EXtoMEM.FLAG_Z = 0;
 	}
 
+	
+		EXtoMEM.mem_address = 0;
+		EXtoMEM.nbits = 0;
+		EXtoMEM.branch = false; //NOTE: will need to be reset in BR
+		EXtoMEM.mem_read = false;
+		EXtoMEM.mem_write = false;
+		EXtoMEM.reg_write = true; //NOTE: will need to be reset in BR
+		EXtoMEM.mem_to_reg = false;
 }
 
 void SUBx(char instr_type, int set_flag, int fields[]){
@@ -374,12 +390,6 @@ void LSx(int fields[]){
 
 void STURx(int nbits, int fields[]){
 
-	EXtoMEM.dest_register = 0;
-	EXtoMEM.mem_read = false;
-	EXtoMEM.mem_write = true;
-	EXtoMEM.reg_write = false;
-	EXtoMEM.mem_to_reg = false;
-
 	int regs[] = {fields[3], fields[4]};
 	int64_t *res = forward(regs, 2);
 	uint64_t start_addr = (uint64_t)(res[0] + fields[1]);
@@ -409,6 +419,12 @@ void STURx(int nbits, int fields[]){
 		result = (int64_t)mem;
 	}
 
+	
+	EXtoMEM.dest_register = 0;
+	EXtoMEM.mem_read = false;
+	EXtoMEM.mem_write = true;
+	EXtoMEM.reg_write = false;
+	EXtoMEM.mem_to_reg = false;
 	EXtoMEM.mem_address = start_addr;
 	EXtoMEM.result = result;
 	EXtoMEM.nbits = nbits;
@@ -416,12 +432,7 @@ void STURx(int nbits, int fields[]){
 }
 
 void LDURx(int nbits, int fields[]){
-
-	EXtoMEM.result = 0;
-	EXtoMEM.mem_read = true;
-	EXtoMEM.mem_write = false;
-	EXtoMEM.mem_to_reg = true;
-	EXtoMEM.reg_write = true;
+	printf("executing LDUR\n");
 
 	int regs[] = {fields[3]};
 	int64_t *res = forward(regs, 1);
@@ -429,6 +440,12 @@ void LDURx(int nbits, int fields[]){
 	//printf("load start addr: %08lx\n", start_addr);
 	//printf("load start addr+32: %08lx\n", start_addr + 4);
 
+
+	EXtoMEM.result = 0;
+	EXtoMEM.mem_read = true;
+	EXtoMEM.mem_write = false;
+	EXtoMEM.mem_to_reg = true;
+	EXtoMEM.reg_write = true;
 	EXtoMEM.mem_address = start_addr;
 	EXtoMEM.nbits = nbits;
 	EXtoMEM.dest_register = fields[4];
@@ -588,13 +605,13 @@ void execute(char instr_type, int fields[])
   switch (instr_type){
     case 'R': {
       //printf("case R\n");
-		EXtoMEM.mem_address = 0;
-		EXtoMEM.nbits = 0;
-		EXtoMEM.branch = false; //NOTE: will need to be reset in BR
-		EXtoMEM.mem_read = false;
-		EXtoMEM.mem_write = false;
-		EXtoMEM.reg_write = true; //NOTE: will need to be reset in BR
-		EXtoMEM.mem_to_reg = false;
+		//EXtoMEM.mem_address = 0;
+		//EXtoMEM.nbits = 0;
+		//EXtoMEM.branch = false; //NOTE: will need to be reset in BR
+		//EXtoMEM.mem_read = false;
+		//EXtoMEM.mem_write = false;
+		//EXtoMEM.reg_write = true; //NOTE: will need to be reset in BR
+		//EXtoMEM.mem_to_reg = false;
       switch(fields[0]) {
 
               case 0x459: // ADD extended format treated as ADD
@@ -635,17 +652,17 @@ void execute(char instr_type, int fields[])
                   BR(fields);
                 } break;
       }
-
+	
     } break;
     case 'I': {
       //printf("case I\n");
-		EXtoMEM.mem_address = 0;
-		EXtoMEM.nbits = 0;
-		EXtoMEM.branch = false;
-		EXtoMEM.mem_read = false;
-		EXtoMEM.mem_write = false;
-		EXtoMEM.reg_write = true;
-		EXtoMEM.mem_to_reg = false;
+		//EXtoMEM.mem_address = 0;
+		//EXtoMEM.nbits = 0;
+		//EXtoMEM.branch = false;
+		//EXtoMEM.mem_read = false;
+		//EXtoMEM.mem_write = false;
+		//EXtoMEM.reg_write = true;
+		//EXtoMEM.mem_to_reg = false;
       switch(fields[0]) {
 
         case 0x244: { // ADDI
