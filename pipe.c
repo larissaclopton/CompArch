@@ -174,7 +174,7 @@ void ADDx(char instr_type, int set_flag, int fields[]){
   bool f1, f2;
 	if(instr_type == 'R'){
 		int regs[2] = {fields[1], fields[3]};
-		int res[2] = forward(regs, 2);
+		int64_t *res = forward(regs, 2);
 
 		if(!EX_FLUSH){
 			EXtoMEM.result = res[0] + res[1];
@@ -183,7 +183,7 @@ void ADDx(char instr_type, int set_flag, int fields[]){
 	}
 	else{
 		int regs[1] = {fields[2]};
-		int res[1] = forward(regs, 1);
+		int64_t *res = forward(regs, 1);
 
     	if(!EX_FLUSH){
     		EXtoMEM.result = fields[1] + res[0];
@@ -210,45 +210,65 @@ void ADDx(char instr_type, int set_flag, int fields[]){
     	else
         	EXtoMEM.FLAG_Z = 0;
 	}
+
+	free(res);
 }
 
 void SUBx(char instr_type, int set_flag, int fields[]){
 	int64_t temp;
 
 	if(instr_type == 'R'){
+		int regs[2] = {fields[3], fields[1]};
+		int64_t *res = forward(regs, 2);
 		//TODO: check if registers are waiting to be written
-		temp = forward(fields[3]) - forward(fields[1]);
+		EXtoMEM_result = res[0] - res[1];
 		EXtoMEM.dest_register = fields[4];
 	}
 	else{
+		int regs[1] = {fields[2]};
+		int64_t *res = forward(regs, 1);
 		//TODO: check if register waiting to be written
-		temp = (int64_t)forward(fields[2]) - (int64_t)fields[1];
+		EXtoMEM.result = (int64_t)res[0] - (int64_t)fields[1];
 		EXtoMEM.dest_register = fields[3];
 	}
-	EXtoMEM.result = temp;
+	
+	if(EX_FLUSH){
+		EX_bubble();
+		set_flag = 0;
+	}
 
 	//TODO: still set flags in current state?
 	if(set_flag){
 		if(temp < CURRENT_STATE.REGS[31])
-    	EXtoMEM.FLAG_N = 1;
-    else
-      EXtoMEM.FLAG_N = 0;
+    		EXtoMEM.FLAG_N = 1;
+   		else
+      		EXtoMEM.FLAG_N = 0;
 
-    if(temp == CURRENT_STATE.REGS[31])
-      EXtoMEM.FLAG_Z = 1;
-    else
-    	EXtoMEM.FLAG_Z = 0;
+    	if(temp == CURRENT_STATE.REGS[31])
+      		EXtoMEM.FLAG_Z = 1;
+    	else
+    		EXtoMEM.FLAG_Z = 0;
 
 			//set 0-register to 0
 			CURRENT_STATE.REGS[31] = 0;
 	}
+
+	free(res);
 }
 
 void ANDx(int set_flag, int fields[]) {
 	//TODO: check if registers are waiting to be written
-	int64_t temp = forward(fields[3]) & forward(fields[1]);
+	int regs[2] = {fields[3], fields[1]};
+	int64_t *res = forward(regs, 2);
+
+	int64_t temp = res[0] & res[1];
 	EXtoMEM.dest_register = fields[4];
 	EXtoMEM.result = temp;
+
+	if(EX_FLUSH){
+		EX_bubble();
+		set_flag = 0;
+	}
 
 	//TODO: still set flags in current state?
 	if(set_flag){
@@ -262,25 +282,41 @@ void ANDx(int set_flag, int fields[]) {
 		else
 			EXtoMEM.FLAG_Z = 0;
 	}
+
+	free(res);
 }
 
 void MUL(int fields[]){
+	int regs[2] = {fields[3], fields[1]};
+	int64_t *res = forward(regs, 2);
+
 	//TODO: check if registers are waiting to be written
-	int64_t temp = (forward(fields[3]) * forward(fields[1]));
+	int64_t temp = res[0] * res[1];
 	EXtoMEM.dest_register = fields[4];
 	EXtoMEM.result = temp;
+
+	if(EX_FLUSH){
+		EX_bubble();
+	}
+
+	free(res);		
 }
 
 void EOR(int fields[]){
 	//TODO: check if registers are waiting to be written
-	int64_t temp = forward(fields[1]) ^ forward(fields[3]);
+	int regs[2] = {fields[3], fields[1]};
+	int64_t *res = forward(regs, 2);
+	int64_t temp = res[1] ^ res[0];
 	EXtoMEM.dest_register = fields[4];
 	EXtoMEM.result = temp;
 }
 
 void ORR(int fields[]){
+	int regs[2] = {fields[3], fields[1]};
+	int64_t *res = forward(regs, 2);
+
 	//TODO: check if registers are waiting to be written
-	int64_t temp = forward(fields[1]) | forward(fields[3]);
+	int64_t temp = res[1] | res[0];
 	EXtoMEM.dest_register = fields[4];
 	EXtoMEM.result = temp;
 }
@@ -291,7 +327,10 @@ void BR(int fields[]){
 
 	//TODO: check if register is waiting to be written
 	//TODO: how to squash instructions already in pipeline?
-	CURRENT_STATE.PC = forward(fields[3]);
+	int regs[1] = {fields[3]};
+	int64_t *res = forward(regs, 1);
+
+	CURRENT_STATE.PC = res[0];
 }
 
 void MOVZ(int fields[]){
