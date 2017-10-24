@@ -82,7 +82,8 @@ bool EX_STALL = false;
 bool MEM_STALL = false;
 bool WB_STALL = false;
 
-bool TMP_STALL = false;
+bool TMP_STALL_EX = false;
+bool TMP_STALL_IF = false;
 
 
 void IF_bubble(){
@@ -102,7 +103,7 @@ void ID_bubble(){
   	EX_FLUSH = true;
 }
 
-void EX_bubble(){	
+void EX_bubble(){
     EXtoMEM.result = 0;
     EXtoMEM.dest_register = 0;
     EXtoMEM.mem_address = 0;
@@ -128,7 +129,7 @@ void MEM_bubble(){
 
 int64_t* forward(int regs[], int len){
   	int64_t *res = (int64_t*)malloc(len*sizeof(int64_t));
-	int stall = 0;	
+	int stall = 0;
 
 	int i;
 	for(i = 0; i < len; i++){
@@ -153,7 +154,7 @@ int64_t* forward(int regs[], int len){
 				continue;
     		}
   		}
-		
+
   		res[i] = CURRENT_STATE.REGS[regs[i]];
 
 	}
@@ -164,7 +165,7 @@ int64_t* forward(int regs[], int len){
 		ID_STALL = true;
 		EX_FLUSH = true;
 
-	    TMP_STALL = true;
+	  TMP_STALL_EX = true;
 	}
 	else{
 		printf("forward decides NOT to stall\n");
@@ -209,7 +210,7 @@ void ADDx(char instr_type, int set_flag, int fields[]){
 		EX_bubble();
 		EX_FLUSH = false;
 		return;
-	}	
+	}
 
 	if(set_flag){
 		if(EXtoMEM.result < CURRENT_STATE.REGS[31])
@@ -249,10 +250,11 @@ void SUBx(char instr_type, int set_flag, int fields[]){
 		EXtoMEM.dest_register = fields[3];
 		free(res);
 	}
-	
+
 	if(EX_FLUSH){
 		EX_bubble();
 		EX_FLUSH = false;
+    CURRENT_STATE.REGS[31] = 0;
 		return;
 	}
 
@@ -312,7 +314,7 @@ void ANDx(int set_flag, int fields[]) {
 
 	free(res);
 
-	
+
 	EXtoMEM.mem_address = 0;
 	EXtoMEM.nbits = 0;
 	EXtoMEM.branch = false; //NOTE: will need to be reset in BR
@@ -339,15 +341,15 @@ void MUL(int fields[]){
 	}
 
 	free(res);
-	
+
 	EXtoMEM.mem_address = 0;
 	EXtoMEM.nbits = 0;
 	EXtoMEM.branch = false; //NOTE: will need to be reset in BR
 	EXtoMEM.mem_read = false;
 	EXtoMEM.mem_write = false;
 	EXtoMEM.reg_write = true; //NOTE: will need to be reset in BR
-	EXtoMEM.mem_to_reg = false;			
-	
+	EXtoMEM.mem_to_reg = false;
+
 }
 
 void EOR(int fields[]){
@@ -373,7 +375,7 @@ void EOR(int fields[]){
 	EXtoMEM.mem_read = false;
 	EXtoMEM.mem_write = false;
 	EXtoMEM.reg_write = true; //NOTE: will need to be reset in BR
-	EXtoMEM.mem_to_reg = false;	
+	EXtoMEM.mem_to_reg = false;
 }
 
 void ORR(int fields[]){
@@ -400,7 +402,7 @@ void ORR(int fields[]){
 	EXtoMEM.mem_read = false;
 	EXtoMEM.mem_write = false;
 	EXtoMEM.reg_write = true; //NOTE: will need to be reset in BR
-	EXtoMEM.mem_to_reg = false;	
+	EXtoMEM.mem_to_reg = false;
 }
 
 //TODO: add data dependency shit (ex flush check, handle pc in some way)
@@ -410,16 +412,28 @@ void BR(int fields[]){
 	//TODO: how to squash instructions already in pipeline?
 	int regs[1] = {fields[3]};
 	int64_t *res = forward(regs, 1);
+  int64_t tmp = res[0];
 
-	CURRENT_STATE.PC = res[0];
-	
+  if(EX_FLUSH){
+		EX_bubble();
+		free(res);
+		EX_FLUSH = false;
+		return;
+	}
+
+	free(res);
+
+	CURRENT_STATE.PC = tmp;
+
 	EXtoMEM.nbits = 0;
 	EXtoMEM.branch = true; //NOTE: will need to be reset in BR
 	EXtoMEM.mem_read = false;
 	EXtoMEM.mem_write = false;
 	EXtoMEM.reg_write = false; //NOTE: will need to be reset in BR
-	EXtoMEM.mem_to_reg = false;	
-	
+	EXtoMEM.mem_to_reg = false;
+
+  ID_FLUSH = true;
+  TMP_STALL_IF = true;
 }
 
 void MOVZ(int fields[]){
@@ -445,7 +459,7 @@ void MOVZ(int fields[]){
 	EXtoMEM.mem_read = false;
 	EXtoMEM.mem_write = false;
 	EXtoMEM.reg_write = true; //NOTE: will need to be reset in BR
-	EXtoMEM.mem_to_reg = false;	
+	EXtoMEM.mem_to_reg = false;
 }
 
 void LSx(int fields[]){
@@ -456,7 +470,7 @@ void LSx(int fields[]){
 	left_shift = (~left_shift) + 1;
 
 	int regs[] = {fields[2]};
-	int64_t *res = forward(regs,1);	
+	int64_t *res = forward(regs,1);
 	uint64_t val = (uint64_t)res[0];
 
 	if(shamt == 0x3F){
@@ -475,7 +489,7 @@ void LSx(int fields[]){
 	EXtoMEM.mem_read = false;
 	EXtoMEM.mem_write = false;
 	EXtoMEM.reg_write = true; //NOTE: will need to be reset in BR
-	EXtoMEM.mem_to_reg = false;	
+	EXtoMEM.mem_to_reg = false;
 }
 
 void STURx(int nbits, int fields[]){
@@ -515,10 +529,10 @@ void STURx(int nbits, int fields[]){
 		EX_FLUSH = false;
 		return;
 	}
-	
+
 	free(res);
-	
-	EXtoMEM.branch = false;	
+
+	EXtoMEM.branch = false;
 	EXtoMEM.dest_register = 0;
 	EXtoMEM.mem_read = false;
 	EXtoMEM.mem_write = true;
@@ -548,7 +562,7 @@ void LDURx(int nbits, int fields[]){
 
 	free(res);
 
-	
+
 	EXtoMEM.branch = false;
 	EXtoMEM.result = 0;
 	EXtoMEM.mem_read = true;
@@ -565,9 +579,20 @@ void LDURx(int nbits, int fields[]){
 void BRANCH_IMM(int fields[]){
 	//printf("branching IMM\n");
 	int64_t addr = (((((int64_t)fields[1]) << 38 ) >> 38) << 2);
-	CURRENT_STATE.PC = CURRENT_STATE.PC - 4 + addr;
-	//printf("bar addr: %016lx\n", NEXT_STATE.PC);
+	CURRENT_STATE.PC = CURRENT_STATE.PC - 8 + addr;
 
+  EXtoMEM.branch = true;
+  EXtoMEM.result = 0;
+  EXtoMEM.dest_register = 0;
+  EXtoMEM.mem_address = 0;
+  EXtoMEM.mem_read = false;
+  EXtoMEM.mem_write = false;
+  EXtoMEM.reg_write = false;
+  EXtoMEM.mem_to_reg = false;
+
+  // if the branch is taken (which it is)
+  ID_FLUSH = true;
+  TMP_STALL_IF = true;
 }
 
 //TODO: data & control dependency
@@ -582,15 +607,42 @@ void CBNZ(int fields[]){
 
 	int regs[] = {fields[2]};
 	int64_t *res = forward(regs, 1);
-	if(res[0] != CURRENT_STATE.REGS[31]) {
-		EXtoMEM.branch = true;
-		CURRENT_STATE.PC = CURRENT_STATE.PC - 4 + addr;
-	}
-	else {
-		//NEXT_STATE.PC = CURRENT_STATE.PC + 4;
-		EXtoMEM.branch = false;
+  int64_t tmp = res[0];
+
+  if(EX_FLUSH){
+		EX_bubble();
+		EX_FLUSH = false;
+		free(res);
+		return;
 	}
 
+  free(res);
+
+
+	if(tmp != CURRENT_STATE.REGS[31]) {
+    EXtoMEM.branch = true;
+    //printf("branching...\n");
+    CURRENT_STATE.PC = CURRENT_STATE.PC - 8 + addr;
+
+    ID_FLUSH = true;
+    TMP_STALL_IF = true;
+	}
+	else {
+    //printf("not branching...\n");
+		EXtoMEM.branch = false;
+    ID_bubble();
+    ID_STALL = true;
+    TMP_STALL_IF = true;
+	}
+
+
+  EXtoMEM.result = 0;
+  EXtoMEM.dest_register = 0;
+  EXtoMEM.mem_address = 0;
+  EXtoMEM.mem_read = false;
+  EXtoMEM.mem_write = false;
+  EXtoMEM.reg_write = false;
+  EXtoMEM.mem_to_reg = false;
 }
 
 
@@ -605,14 +657,43 @@ void CBZ(int fields[]){
 
 	int regs[] = {fields[2]};
 	int64_t *res = forward(regs, 1);
-	if(res[0] == CURRENT_STATE.REGS[31]) {
-		EXtoMEM.branch = true;
-		CURRENT_STATE.PC = CURRENT_STATE.PC - 4 + addr;
+  int64_t tmp = res[0];
+
+
+  if(EX_FLUSH){
+		EX_bubble();
+		EX_FLUSH = false;
+		free(res);
+		return;
+	}
+
+  free(res);
+
+
+	if(tmp == CURRENT_STATE.REGS[31]) {
+    EXtoMEM.branch = true;
+    //printf("branching...\n");
+    CURRENT_STATE.PC = CURRENT_STATE.PC - 8 + addr;
+
+    ID_FLUSH = true;
+    TMP_STALL_IF = true;
 	}
 	else {
+    //printf("not branching...\n");
 		EXtoMEM.branch = false;
-		//NEXT_STATE.PC = CURRENT_STATE.PC + 4;
+    ID_bubble();
+    ID_STALL = true;
+    TMP_STALL_IF = true;
 	}
+
+
+  EXtoMEM.result = 0;
+  EXtoMEM.dest_register = 0;
+  EXtoMEM.mem_address = 0;
+  EXtoMEM.mem_read = false;
+  EXtoMEM.mem_write = false;
+  EXtoMEM.reg_write = false;
+  EXtoMEM.mem_to_reg = false;
 
 }
 
@@ -662,13 +743,26 @@ void B_COND(int fields[]){
 	if(branch){
 		EXtoMEM.branch = true;
 		//printf("branching...\n");
-		CURRENT_STATE.PC = CURRENT_STATE.PC - 4 + addr;
+		CURRENT_STATE.PC = CURRENT_STATE.PC - 8 + addr;
+
+    ID_FLUSH = true;
+    TMP_STALL_IF = true;
 	}
 	else{
 		//printf("not branching...\n");
 		EXtoMEM.branch = false;
-		//NEXT_STATE.PC = CURRENT_STATE.PC + 4;
+    ID_bubble();
+    ID_STALL = true;
+    TMP_STALL_IF = true;
 	}
+
+  EXtoMEM.result = 0;
+  EXtoMEM.dest_register = 0;
+  EXtoMEM.mem_address = 0;
+  EXtoMEM.mem_read = false;
+  EXtoMEM.mem_write = false;
+  EXtoMEM.reg_write = false;
+  EXtoMEM.mem_to_reg = false;
 }
 
 void STURx_MEM(uint64_t start_addr, int nbits, int64_t val){
@@ -769,7 +863,7 @@ void execute(char instr_type, int fields[])
                   BR(fields);
                 } break;
       }
-	
+
     } break;
     case 'I': {
       //printf("case I\n");
@@ -840,13 +934,13 @@ void execute(char instr_type, int fields[])
       //NEXT_STATE.PC = CURRENT_STATE.PC + 4;
     } break;
     case 'C': {
-		EXtoMEM.result = 0;
-		EXtoMEM.dest_register = 0;
-		EXtoMEM.mem_address = 0;
-		EXtoMEM.mem_read = false;
-		EXtoMEM.mem_write = false;
-		EXtoMEM.reg_write = false;
-		EXtoMEM.mem_to_reg = false;
+		// EXtoMEM.result = 0;
+		// EXtoMEM.dest_register = 0;
+		// EXtoMEM.mem_address = 0;
+		// EXtoMEM.mem_read = false;
+		// EXtoMEM.mem_write = false;
+		// EXtoMEM.reg_write = false;
+		// EXtoMEM.mem_to_reg = false;
       switch (fields[0]) {
         case 0xB5: { //CBNZ
           CBNZ(fields);
@@ -861,14 +955,14 @@ void execute(char instr_type, int fields[])
       }
     } break;
     case 'B': {
-		EXtoMEM.branch = true;
-		EXtoMEM.result = 0;
-		EXtoMEM.dest_register = 0;
-		EXtoMEM.mem_address = 0;
-		EXtoMEM.mem_read = false;
-		EXtoMEM.mem_write = false;
-		EXtoMEM.reg_write = false;
-		EXtoMEM.mem_to_reg = false;
+		// EXtoMEM.branch = true;
+		// EXtoMEM.result = 0;
+		// EXtoMEM.dest_register = 0;
+		// EXtoMEM.mem_address = 0;
+		// EXtoMEM.mem_read = false;
+		// EXtoMEM.mem_write = false;
+		// EXtoMEM.reg_write = false;
+		// EXtoMEM.mem_to_reg = false;
       //call function (immediate branching)
       //printf("immediate branching...\n");
       BRANCH_IMM(fields);
@@ -986,7 +1080,9 @@ void D_decoder(int instruct_no)
 
 void B_decoder(int instruct_no){
 
-	//TODO: FLUSHLLLLLLL
+	//TODO: FLUSH
+  //TMP_STALL_IF = true;
+  //ID_FLUSH = true;
 
 	//nonconditional immediate branching if 6 bit opcode is 0x05
 	if ((((unsigned) instruct_no) >> 26) == 0x00000005) {
@@ -1099,6 +1195,7 @@ void pipe_stage_wb()
 			   printf("WB result: %16lx\n", MEMtoWB.result);
 			   printf("WB dest reg: %d\n", MEMtoWB.dest_register);
 			   CURRENT_STATE.REGS[MEMtoWB.dest_register] = MEMtoWB.result;
+         CURRENT_STATE.REGS[31] = 0;
 	    }
 	  }
 	  else{
@@ -1142,13 +1239,13 @@ void pipe_stage_execute()
       EXtoMEM.HALT_FLAG = IDtoEX.HALT_FLAG;
       int fields[] = {IDtoEX.fields1, IDtoEX.fields2, IDtoEX.fields3, IDtoEX.fields4, IDtoEX.fields5};
       execute(IDtoEX.instr_type, fields);
-      
-	  if(!TMP_STALL){
-	  	printf("MEM unFLUSHed\n");
-      	MEM_FLUSH = false;
-	  }
-	  else
-		TMP_STALL = false;
+
+	     if(!TMP_STALL_EX){
+	  	     printf("MEM unFLUSHed\n");
+      	   MEM_FLUSH = false;
+	     }
+	     else
+		      TMP_STALL_EX = false;
     }
     else{
 	  EX_bubble();
@@ -1174,12 +1271,26 @@ void pipe_stage_fetch()
 {
   if(!IF_STALL){
     if(!IF_FLUSH){
- 		  uint32_t temp = mem_read_32(CURRENT_STATE.PC);
-		  //printf("%08x \n", temp);
-		  IFtoID.instruction = temp;
- 		  CURRENT_STATE.PC += 4;
-		  printf("ID unFLUSHed\n");
-		  ID_FLUSH = false;
+      if(!TMP_STALL_IF){
+ 		     uint32_t temp = mem_read_32(CURRENT_STATE.PC);
+		    //printf("%08x \n", temp);
+		    IFtoID.instruction = temp;
+        printf("incrementing PC...\n");
+        CURRENT_STATE.PC += 4;
+
+		    printf("ID unFLUSHed\n");
+		    ID_FLUSH = false;
+      }
+      else{
+        TMP_STALL_IF = false;
+
+        if(EXtoMEM.branch)
+          IF_bubble();
+        else
+          ID_STALL = false;
+
+      }
+
 	  }
 	  else{
 		  IF_bubble();
