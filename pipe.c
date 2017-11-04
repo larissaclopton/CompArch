@@ -6,11 +6,16 @@
 
 #include "pipe.h"
 #include "shell.h"
+#include "bp.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
 
+
+// NOTE: Team Members
+// Larissa Clopton cloptla
+// Nathan Chortek	nchortek
 
 
 /* global pipeline state */
@@ -20,11 +25,15 @@ void pipe_init()
 {
     memset(&CURRENT_STATE, 0, sizeof(CPU_State));
     CURRENT_STATE.PC = 0x00400000;
+
+    bp_inialize();
 }
 
 
 typedef struct Pipe_Reg_IFtoID{
 	int instruction;
+  uint64_t PC;
+  uint64_t target;
 } Pipe_Reg_IFtoID;
 
 static Pipe_Reg_IFtoID IFtoID;
@@ -37,6 +46,8 @@ typedef struct Pipe_Reg_IDtoEX{
 	int fields4;
 	int fields5;
  	char instr_type;
+  uint64_t PC;
+  uint64_t target;
 } Pipe_Reg_IDtoEX;
 
 static Pipe_Reg_IDtoEX IDtoEX = {false, 0, 0, 0, 0, 0, '0'};
@@ -423,7 +434,11 @@ void BR(int fields[]){
 
 	free(res);
 
-	CURRENT_STATE.PC = tmp;
+  if(IDtoEX.target != tmp){
+    //misprediction handling
+    CURRENT_STATE.PC = tmp;
+  }
+  bp_update(IDtoEX.PC, tmp, 1, 0);
 
 	EXtoMEM.nbits = 0;
 	EXtoMEM.branch = true; //NOTE: will need to be reset in BR
@@ -435,6 +450,8 @@ void BR(int fields[]){
   ID_FLUSH = true;
   TMP_STALL_IF = true;
 }
+
+
 
 void MOVZ(int fields[]){
 	int64_t val = (int64_t)fields[2];
@@ -579,7 +596,12 @@ void LDURx(int nbits, int fields[]){
 void BRANCH_IMM(int fields[]){
 	//printf("branching IMM\n");
 	int64_t addr = (((((int64_t)fields[1]) << 38 ) >> 38) << 2);
-	CURRENT_STATE.PC = CURRENT_STATE.PC - 8 + addr;
+  if(IDtoEX.target != IDtoEX.PC + addr){
+    //misprediction handling
+    CURRENT_STATE.PC = IDtoEX.PC + addr;
+  }
+  bp_update(IDtoEX.PC, IDtoEX.PC + addr, 1, 0);
+
 
   EXtoMEM.branch = true;
   EXtoMEM.result = 0;
@@ -622,13 +644,23 @@ void CBNZ(int fields[]){
 	if(tmp != CURRENT_STATE.REGS[31]) {
     EXtoMEM.branch = true;
     //printf("branching...\n");
-    CURRENT_STATE.PC = CURRENT_STATE.PC - 8 + addr;
+    if(IDtoEX.target != IDtoEX.PC + addr){
+      //misprediction handling
+      CURRENT_STATE.PC = IDtoEX.PC + addr;
+    }
+    bp_update(IDtoEX.PC, IDtoEX.PC + addr, 1, 1);
 
     ID_FLUSH = true;
     TMP_STALL_IF = true;
 	}
 	else {
     //printf("not branching...\n");
+    if(IDtoEX.target != IDtoEX.PC + 4){
+      //misprediction handling
+      CURRENT_STATE.PC = IDtoEX.PC + 4;
+    }
+    bp_update(IDtoEX.PC, IDtoEX.PC + 4, 0, 1);
+
 		EXtoMEM.branch = false;
     ID_bubble();
     ID_STALL = true;
@@ -673,13 +705,23 @@ void CBZ(int fields[]){
 	if(tmp == CURRENT_STATE.REGS[31]) {
     EXtoMEM.branch = true;
     //printf("branching...\n");
-    CURRENT_STATE.PC = CURRENT_STATE.PC - 8 + addr;
+    if(IDtoEX.target != IDtoEX.PC + addr){
+      //misprediction handling
+      CURRENT_STATE.PC = IDtoEX.PC + addr;
+    }
+    bp_update(IDtoEX.PC, IDtoEX.PC + addr, 1, 1);
 
     ID_FLUSH = true;
     TMP_STALL_IF = true;
 	}
 	else {
     //printf("not branching...\n");
+    if(IDtoEX.target != IDtoEX.PC + 4){
+      //misprediction handling
+      CURRENT_STATE.PC = IDtoEX.PC + 4;
+    }
+    bp_update(IDtoEX.PC, IDtoEX.PC + 4, 0, 1);
+
 		EXtoMEM.branch = false;
     ID_bubble();
     ID_STALL = true;
@@ -743,13 +785,24 @@ void B_COND(int fields[]){
 	if(branch){
 		EXtoMEM.branch = true;
 		//printf("branching...\n");
-		CURRENT_STATE.PC = CURRENT_STATE.PC - 8 + addr;
+    if(IDtoEX.target != IDtoEX.PC + addr){
+      //misprediction handling
+      CURRENT_STATE.PC = IDtoEX.PC + addr;
+    }
+    bp_update(IDtoEX.PC, IDtoEX.PC + addr, 1, 1);
 
     ID_FLUSH = true;
     TMP_STALL_IF = true;
 	}
 	else{
 		//printf("not branching...\n");
+    if(IDtoEX.target != IDtoEX.PC + 4){
+      //misprediction handling
+      CURRENT_STATE.PC = IDtoEX.PC + 4;
+    }
+  	//CURRENT_STATE.PC = CURRENT_STATE.PC - 8 + addr;
+    bp_update(IDtoEX.PC, IDtoEX.PC + 4, 0, 1);
+
 		EXtoMEM.branch = false;
     ID_bubble();
     ID_STALL = true;
@@ -1257,6 +1310,8 @@ void pipe_stage_decode()
 {
   if(!ID_STALL){
     if(!ID_FLUSH){
+      IDtoEX.PC = IFtoID.PC;
+      IDtoEX.target = IFtoID.target;
       decode(IFtoID.instruction);
 	    printf("EX unFLUSHed\n");
 	    EX_FLUSH = false;
@@ -1276,7 +1331,10 @@ void pipe_stage_fetch()
 		    //printf("%08x \n", temp);
 		    IFtoID.instruction = temp;
         printf("incrementing PC...\n");
-        CURRENT_STATE.PC += 4;
+        //CURRENT_STATE.PC += 4;
+        IFtoID.PC = CURRENT_STATE.PC;
+        bp_predict(CURRENT_STATE.PC);
+        IFtoID.target = CURRENT_STATE.PC;
 
 		    printf("ID unFLUSHed\n");
 		    ID_FLUSH = false;
