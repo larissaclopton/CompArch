@@ -4,6 +4,10 @@
  * ARM pipeline timing simulator
  */
 
+// NOTE: Team Members
+// Larissa Clopton cloptla
+// Nathan Chortek  nchortek
+
 #include "pipe.h"
 #include "shell.h"
 #include "bp.h"
@@ -12,74 +16,39 @@
 #include <stdlib.h>
 #include <assert.h>
 
-
-// NOTE: Team Members
-// Larissa Clopton cloptla
-// Nathan Chortek	nchortek
-
-
 /* global pipeline state */
 CPU_State CURRENT_STATE;
+
+// caches
+cache_t *data_cache;
+cache_t *inst_cache;
+
+// variables used for instruction cache control flow
+uint set_index;
+uint tag;
+
+// cache stall counters
+uint inst_cycles = 0;
+uint data_cycles = 0;
 
 void pipe_init()
 {
     memset(&CURRENT_STATE, 0, sizeof(CPU_State));
     CURRENT_STATE.PC = 0x00400000;
 
-    bp_inialize();
+    bp_initialize();
+
+    data_cache = cache_new(64, 4, 32);
+    inst_cache = cache_new(256, 8, 32);
 }
 
+Pipe_Reg_IFtoID IFtoID;
 
-typedef struct Pipe_Reg_IFtoID{
-	int instruction;
-  uint64_t PC;
-  uint64_t target;
-} Pipe_Reg_IFtoID;
+Pipe_Reg_IDtoEX IDtoEX = {false, 0, 0, 0, 0, 0, '0'};
 
-static Pipe_Reg_IFtoID IFtoID;
+Pipe_Reg_EXtoMEM EXtoMEM = {false, 0, 0, 0, 0, 0, 0, false, false, false, false, false};
 
-typedef struct Pipe_Reg_IDtoEX{
-	bool HALT_FLAG;
-	int fields1;
-	int fields2;
-	int fields3;
-	int fields4;
-	int fields5;
- 	char instr_type;
-  uint64_t PC;
-  uint64_t target;
-} Pipe_Reg_IDtoEX;
-
-static Pipe_Reg_IDtoEX IDtoEX = {false, 0, 0, 0, 0, 0, '0'};
-
-typedef struct Pipe_Reg_EXtoMEM{
-	bool HALT_FLAG;
-	int FLAG_Z;
-	int FLAG_N;
-	int64_t result;
-	int dest_register;
-	uint64_t mem_address;
-	int nbits; // for STURx and LDURx
- 	bool branch;
- 	bool mem_read;
- 	bool mem_write;
- 	bool reg_write;
- 	bool mem_to_reg;
-} Pipe_Reg_EXtoMEM;
-
-static Pipe_Reg_EXtoMEM EXtoMEM = {false, 0, 0, 0, 0, 0, 0, false, false, false, false, false};
-
-typedef struct Pipe_Reg_MEMtoWB{
-	bool HALT_FLAG;
-	int FLAG_Z;
-	int FLAG_N;
-	int64_t result;
-	int dest_register;
-	bool reg_write;
-	bool mem_to_reg;
-} Pipe_Reg_MEMtoWB;
-
-static Pipe_Reg_MEMtoWB MEMtoWB = {false, 0, 0, 0, 0, false, false};
+Pipe_Reg_MEMtoWB MEMtoWB = {false, 0, 0, 0, 0, false, false};
 
 bool IF_FLUSH = false;
 bool ID_FLUSH = true;
@@ -99,8 +68,11 @@ bool TMP_STALL_IF = false;
 
 void IF_bubble(){
 	IFtoID.instruction = 0;
+  IFtoID.PC = 0;
+  IFtoID.target = 0;
+  IFtoID.prediction = -1;
 	ID_FLUSH = true;
- 	printf("IF bubble\n");
+ 	//printf("IF bubble\n");
 }
 
 void ID_bubble(){
@@ -110,7 +82,10 @@ void ID_bubble(){
   	IDtoEX.fields4 = 0;
   	IDtoEX.fields5 = 0;
   	IDtoEX.instr_type = '0';
-  	printf("ID bubble\n");
+    IDtoEX.PC = 0;
+    IDtoEX.target = 0;
+    IFtoID.prediction = -1;
+  	//printf("ID bubble\n");
   	EX_FLUSH = true;
 }
 
@@ -124,7 +99,7 @@ void EX_bubble(){
  	EXtoMEM.mem_write = false;
  	EXtoMEM.reg_write = false;
  	EXtoMEM.mem_to_reg = false;
-	printf("EX bubble\n");
+	//printf("EX bubble\n");
 	MEM_FLUSH = true;
 }
 
@@ -133,7 +108,7 @@ void MEM_bubble(){
 	MEMtoWB.dest_register = 0;
 	MEMtoWB.reg_write = 0;
 	MEMtoWB.mem_to_reg = 0;
-	printf("MEM bubble\n");
+	//printf("MEM bubble\n");
 	WB_FLUSH = true;
 }
 
@@ -171,7 +146,7 @@ int64_t* forward(int regs[], int len){
 	}
 
 	if(stall){
-		printf("forward decides to stall\n");
+		//printf("forward decides to stall\n");
 		IF_STALL = true;
 		ID_STALL = true;
 		EX_FLUSH = true;
@@ -179,7 +154,7 @@ int64_t* forward(int regs[], int len){
 	  TMP_STALL_EX = true;
 	}
 	else{
-		printf("forward decides NOT to stall\n");
+		//printf("forward decides NOT to stall\n");
 		IF_STALL = false;
 		ID_STALL = false;
 		EX_FLUSH = false;
@@ -192,7 +167,7 @@ int64_t* forward(int regs[], int len){
 // Function implementations
 
 void ADDx(char instr_type, int set_flag, int fields[]){
-	printf("executing ADDx\n");
+	//printf("executing ADDx\n");
 	if(instr_type == 'R'){
 		int regs[2] = {fields[1], fields[3]};
 		int64_t *res = forward(regs, 2);
@@ -434,8 +409,10 @@ void BR(int fields[]){
 
 	free(res);
 
-  if(IDtoEX.target != tmp){
-    //misprediction handling
+  if(IDtoEX.target != tmp || IDtoEX.prediction != 1){
+    //printf("misprediction... predicted: %16lx ... actual: %16lx\n", IDtoEX.target, tmp);
+    ID_FLUSH = true;
+    TMP_STALL_IF = true;
     CURRENT_STATE.PC = tmp;
   }
   bp_update(IDtoEX.PC, tmp, 1, 0);
@@ -446,9 +423,6 @@ void BR(int fields[]){
 	EXtoMEM.mem_write = false;
 	EXtoMEM.reg_write = false; //NOTE: will need to be reset in BR
 	EXtoMEM.mem_to_reg = false;
-
-  ID_FLUSH = true;
-  TMP_STALL_IF = true;
 }
 
 
@@ -562,7 +536,7 @@ void STURx(int nbits, int fields[]){
 }
 
 void LDURx(int nbits, int fields[]){
-	printf("executing LDUR\n");
+	//printf("executing LDUR\n");
 
 	int regs[] = {fields[3]};
 	int64_t *res = forward(regs, 1);
@@ -589,15 +563,20 @@ void LDURx(int nbits, int fields[]){
 	EXtoMEM.mem_address = start_addr;
 	EXtoMEM.nbits = nbits;
 	EXtoMEM.dest_register = fields[4];
-
 }
 
 //TODO: control dependency
 void BRANCH_IMM(int fields[]){
 	//printf("branching IMM\n");
 	int64_t addr = (((((int64_t)fields[1]) << 38 ) >> 38) << 2);
-  if(IDtoEX.target != IDtoEX.PC + addr){
-    //misprediction handling
+  //printf("predicted: %16lx ... actual: %16lx\n", IDtoEX.target, IDtoEX.PC + addr);
+  if(IDtoEX.target != IDtoEX.PC + addr || IDtoEX.prediction != 1){
+    //printf("misprediction!\n");
+    //if(IDtoEX.prediction != 1)
+      //printf("predicted not-taken.\n");
+
+    ID_FLUSH = true;
+    TMP_STALL_IF = true;
     CURRENT_STATE.PC = IDtoEX.PC + addr;
   }
   bp_update(IDtoEX.PC, IDtoEX.PC + addr, 1, 0);
@@ -611,10 +590,6 @@ void BRANCH_IMM(int fields[]){
   EXtoMEM.mem_write = false;
   EXtoMEM.reg_write = false;
   EXtoMEM.mem_to_reg = false;
-
-  // if the branch is taken (which it is)
-  ID_FLUSH = true;
-  TMP_STALL_IF = true;
 }
 
 //TODO: data & control dependency
@@ -644,27 +619,27 @@ void CBNZ(int fields[]){
 	if(tmp != CURRENT_STATE.REGS[31]) {
     EXtoMEM.branch = true;
     //printf("branching...\n");
-    if(IDtoEX.target != IDtoEX.PC + addr){
+    if(IDtoEX.target != IDtoEX.PC + addr || IDtoEX.prediction != 1){
+      //printf("misprediction... predicted: %16lx ... actual: %16lx\n", IDtoEX.target, IDtoEX.PC + addr);
       //misprediction handling
+      ID_FLUSH = true;
+      TMP_STALL_IF = true;
       CURRENT_STATE.PC = IDtoEX.PC + addr;
     }
     bp_update(IDtoEX.PC, IDtoEX.PC + addr, 1, 1);
-
-    ID_FLUSH = true;
-    TMP_STALL_IF = true;
 	}
 	else {
     //printf("not branching...\n");
-    if(IDtoEX.target != IDtoEX.PC + 4){
+    if(IDtoEX.target != IDtoEX.PC + 4 || IDtoEX.prediction != 0){
       //misprediction handling
+    //  printf("misprediction... predicted: %16lx ... actual: %16lx\n", IDtoEX.target, IDtoEX.PC + 4);
+      ID_FLUSH = true;
+      TMP_STALL_IF = true;
       CURRENT_STATE.PC = IDtoEX.PC + 4;
     }
     bp_update(IDtoEX.PC, IDtoEX.PC + 4, 0, 1);
 
 		EXtoMEM.branch = false;
-    ID_bubble();
-    ID_STALL = true;
-    TMP_STALL_IF = true;
 	}
 
 
@@ -705,27 +680,27 @@ void CBZ(int fields[]){
 	if(tmp == CURRENT_STATE.REGS[31]) {
     EXtoMEM.branch = true;
     //printf("branching...\n");
-    if(IDtoEX.target != IDtoEX.PC + addr){
+    if(IDtoEX.target != IDtoEX.PC + addr || IDtoEX.prediction != 1){
       //misprediction handling
+      //printf("misprediction... predicted: %16lx ... actual: %16lx\n", IDtoEX.target, IDtoEX.PC + addr);
+      ID_FLUSH = true;
+      TMP_STALL_IF = true;
       CURRENT_STATE.PC = IDtoEX.PC + addr;
     }
     bp_update(IDtoEX.PC, IDtoEX.PC + addr, 1, 1);
-
-    ID_FLUSH = true;
-    TMP_STALL_IF = true;
 	}
 	else {
     //printf("not branching...\n");
-    if(IDtoEX.target != IDtoEX.PC + 4){
+    if(IDtoEX.target != IDtoEX.PC + 4 || IDtoEX.prediction != 0){
       //misprediction handling
+      //printf("misprediction... predicted: %16lx ... actual: %16lx\n", IDtoEX.target, IDtoEX.PC + 4);
+      ID_FLUSH = true;
+      TMP_STALL_IF = true;
       CURRENT_STATE.PC = IDtoEX.PC + 4;
     }
     bp_update(IDtoEX.PC, IDtoEX.PC + 4, 0, 1);
 
 		EXtoMEM.branch = false;
-    ID_bubble();
-    ID_STALL = true;
-    TMP_STALL_IF = true;
 	}
 
 
@@ -785,28 +760,29 @@ void B_COND(int fields[]){
 	if(branch){
 		EXtoMEM.branch = true;
 		//printf("branching...\n");
-    if(IDtoEX.target != IDtoEX.PC + addr){
+    if(IDtoEX.target != IDtoEX.PC + addr || IDtoEX.prediction != 1){
       //misprediction handling
+      //printf("misprediction... predicted: %16lx ... actual: %16lx\n", IDtoEX.target, IDtoEX.PC + addr);
+      ID_FLUSH = true;
+      TMP_STALL_IF = true;
       CURRENT_STATE.PC = IDtoEX.PC + addr;
     }
     bp_update(IDtoEX.PC, IDtoEX.PC + addr, 1, 1);
 
-    ID_FLUSH = true;
-    TMP_STALL_IF = true;
 	}
 	else{
 		//printf("not branching...\n");
-    if(IDtoEX.target != IDtoEX.PC + 4){
+    if(IDtoEX.target != IDtoEX.PC + 4 || IDtoEX.prediction != 0){
       //misprediction handling
+      //printf("misprediction... predicted: %16lx ... actual: %16lx\n", IDtoEX.target, IDtoEX.PC + 4);
+      ID_FLUSH = true;
+      TMP_STALL_IF = true;
       CURRENT_STATE.PC = IDtoEX.PC + 4;
     }
   	//CURRENT_STATE.PC = CURRENT_STATE.PC - 8 + addr;
     bp_update(IDtoEX.PC, IDtoEX.PC + 4, 0, 1);
 
 		EXtoMEM.branch = false;
-    ID_bubble();
-    ID_STALL = true;
-    TMP_STALL_IF = true;
 	}
 
   EXtoMEM.result = 0;
@@ -835,12 +811,11 @@ void STURx_MEM(uint64_t start_addr, int nbits, int64_t val){
 
 int64_t LDURx_MEM(uint64_t start_addr, int nbits){
 
-	printf("LDURx_MEM\n");
+	//printf("LDURx_MEM\n");
 
 	if(nbits == 64){
 		//printf("calling ldur\n");
 		uint64_t lower32 = (uint64_t)mem_read_32(start_addr);
-		//should this be not 32, but 4?)
 		uint64_t upper32 = (uint64_t)mem_read_32(start_addr + 4);
 		//printf("upper 32: %16lx \n", upper32);
 		//printf("lower 32: %16lx \n", lower32);
@@ -858,13 +833,18 @@ int64_t LDURx_MEM(uint64_t start_addr, int nbits){
 		uint64_t val = (uint64_t)mem_read_32(start_addr);
 		return val & 0xFF; // gets bottom 8 bits
 	}
-
 }
 
 
 // Execution implementation
 void execute(char instr_type, int fields[])
 {
+  if(IDtoEX.HALT_FLAG){
+    IF_FLUSH = true;
+    ID_FLUSH = true;
+    return;
+  }
+
   //int branch_reg = 0;
   switch (instr_type){
     case 'R': {
@@ -1176,13 +1156,13 @@ void B_decoder(int instruct_no){
 
 void decode(int instruct_no)
 {
-	printf("initial decoding\n");
+	//printf("initial decoding\n");
 	//unique commands
 	if(instruct_no == 0xd4400000){ // HLT
 		//printf("HLT command detected");
 		IDtoEX.HALT_FLAG = 1;
-		IF_FLUSH = true;
-		CURRENT_STATE.PC +=4;
+		//IF_FLUSH = true;
+		//CURRENT_STATE.PC +=4;
 		return;
 	}
 
@@ -1207,7 +1187,7 @@ void decode(int instruct_no)
 	}
 	//Unallocated
 	else if((first_3 >> 1) == 0){
-		printf("unallocated\n");
+		//printf("unallocated\n");
 	}
 	//Data Processing -- Register
 	else if(last_3 == 5){
@@ -1217,7 +1197,7 @@ void decode(int instruct_no)
 	}
 	//Data Processing -- Scalar Floating-Point and Advanced SIMD
 	else if(last_3 == 7){
-		printf("data processing - scalar floating point\n");
+		//printf("data processing - scalar floating point\n");
 	}
 	//Loads and Stores
 	else{
@@ -1225,7 +1205,7 @@ void decode(int instruct_no)
     	return;
 	}
 
-	printf("ERROR: Unrecognized Command.\n");
+	//printf("ERROR: Unrecognized Command.\n");
 	RUN_BIT = 0;
 }
 
@@ -1236,7 +1216,7 @@ void pipe_stage_wb()
 {
   if(!WB_STALL){
 	  if(!WB_FLUSH){
-		  printf("retiring instruction...\n");
+		  //printf("retiring instruction...\n");
 		  stat_inst_retire++;
 		  if(MEMtoWB.HALT_FLAG){
 			   RUN_BIT = 0;
@@ -1245,39 +1225,74 @@ void pipe_stage_wb()
 		  CURRENT_STATE.FLAG_Z = MEMtoWB.FLAG_Z;
 		  CURRENT_STATE.FLAG_N = MEMtoWB.FLAG_N;
 		  if(MEMtoWB.reg_write) {
-			   printf("WB result: %16lx\n", MEMtoWB.result);
-			   printf("WB dest reg: %d\n", MEMtoWB.dest_register);
+			   //printf("WB result: %16lx\n", MEMtoWB.result);
+			   //printf("WB dest reg: %d\n", MEMtoWB.dest_register);
 			   CURRENT_STATE.REGS[MEMtoWB.dest_register] = MEMtoWB.result;
          CURRENT_STATE.REGS[31] = 0;
 	    }
 	  }
 	  else{
-		  printf("[FLUSHED] WB result: %16lx\n", MEMtoWB.result);
-		  printf("[FLUSHED] WB dest reg: %d\n", MEMtoWB.dest_register);
+		  //printf("[FLUSHED] WB result: %16lx\n", MEMtoWB.result);
+		  //printf("[FLUSHED] WB dest reg: %d\n", MEMtoWB.dest_register);
 	  }
   }
+}
+
+int64_t data_attempt_update(uint64_t addr, int type, int size, uint64_t val){
+  uint64_t temp = data_cache_update(data_cache, addr, type, size, val);
+
+  if(!data_hit){
+   data_cycles = 50;
+   MEM_bubble();
+   MEM_FLUSH = true;
+   IF_STALL = false;
+   ID_STALL = false;
+   EX_STALL = false;
+  }
+
+  return (int64_t)temp;
+}
+
+void passToWB(){
+  MEMtoWB.HALT_FLAG = EXtoMEM.HALT_FLAG;
+  MEMtoWB.FLAG_Z = EXtoMEM.FLAG_Z;
+  MEMtoWB.FLAG_N = EXtoMEM.FLAG_N;
+  MEMtoWB.result = EXtoMEM.result;
+  MEMtoWB.dest_register = EXtoMEM.dest_register;
+  MEMtoWB.reg_write = EXtoMEM.reg_write;
+  MEMtoWB.mem_to_reg = EXtoMEM.mem_to_reg;
+
+  WB_FLUSH = false;
 }
 
 void pipe_stage_mem()
 {
   if(!MEM_STALL){
 	  if(!MEM_FLUSH){
-		  MEMtoWB.HALT_FLAG = EXtoMEM.HALT_FLAG;
-		  MEMtoWB.FLAG_Z = EXtoMEM.FLAG_Z;
-		  MEMtoWB.FLAG_N = EXtoMEM.FLAG_N;
-		  MEMtoWB.result = EXtoMEM.result;
-		  MEMtoWB.dest_register = EXtoMEM.dest_register;
-		  MEMtoWB.reg_write = EXtoMEM.reg_write;
-		  MEMtoWB.mem_to_reg = EXtoMEM.mem_to_reg;
 
-		  if(EXtoMEM.mem_read){
-			   MEMtoWB.result = LDURx_MEM(EXtoMEM.mem_address, EXtoMEM.nbits);
-		  } else if(EXtoMEM.mem_write){
-			   STURx_MEM(EXtoMEM.mem_address, EXtoMEM.nbits, EXtoMEM.result);
-		  }
 
-		  printf("WB unFLUSHed\n");
-		  WB_FLUSH = false;
+      if(EXtoMEM.mem_read || EXtoMEM.mem_write){
+        int64_t temp;
+        if(data_hit){ // the previous cache look-up was a hit
+          temp = data_attempt_update(EXtoMEM.mem_address, EXtoMEM.mem_read,
+                                     EXtoMEM.nbits/8, EXtoMEM.result);
+        }
+        else{ // the previous cache look-up was a miss
+          temp = data_handle_miss(data_cache, EXtoMEM.mem_address, EXtoMEM.mem_read,
+                                  EXtoMEM.nbits/8, EXtoMEM.result);
+        }
+
+        if(data_hit){
+          passToWB();
+
+    		  if(EXtoMEM.mem_read){
+    			   MEMtoWB.result = temp;
+    		  }
+        }
+      }
+      else{
+        passToWB();
+      }
 	  }
 	  else {
 	  	  MEM_bubble();
@@ -1294,7 +1309,7 @@ void pipe_stage_execute()
       execute(IDtoEX.instr_type, fields);
 
 	     if(!TMP_STALL_EX){
-	  	     printf("MEM unFLUSHed\n");
+	  	     //printf("MEM unFLUSHed\n");
       	   MEM_FLUSH = false;
 	     }
 	     else
@@ -1312,8 +1327,9 @@ void pipe_stage_decode()
     if(!ID_FLUSH){
       IDtoEX.PC = IFtoID.PC;
       IDtoEX.target = IFtoID.target;
+      IDtoEX.prediction = IFtoID.prediction;
       decode(IFtoID.instruction);
-	    printf("EX unFLUSHed\n");
+	    //printf("EX unFLUSHed\n");
 	    EX_FLUSH = false;
 	  }
 	  else{
@@ -1322,33 +1338,72 @@ void pipe_stage_decode()
   }
 }
 
+uint32_t inst_attempt_update(){
+  uint32_t temp = inst_cache_update(inst_cache, CURRENT_STATE.PC);
+
+  if(!inst_hit){
+   uint64_t addr = CURRENT_STATE.PC;
+   addr = addr >> 5;
+   set_index = addr & 0x3F;
+   addr = addr >> 6;
+   tag = addr;
+
+   inst_cycles = 50;
+   IF_bubble();
+   IF_FLUSH = true;
+   temp = 0;
+  }
+
+  return temp;
+}
+
 void pipe_stage_fetch()
 {
   if(!IF_STALL){
     if(!IF_FLUSH){
       if(!TMP_STALL_IF){
- 		     uint32_t temp = mem_read_32(CURRENT_STATE.PC);
-		    //printf("%08x \n", temp);
-		    IFtoID.instruction = temp;
-        printf("incrementing PC...\n");
-        //CURRENT_STATE.PC += 4;
-        IFtoID.PC = CURRENT_STATE.PC;
-        bp_predict(CURRENT_STATE.PC);
-        IFtoID.target = CURRENT_STATE.PC;
 
-		    printf("ID unFLUSHed\n");
-		    ID_FLUSH = false;
+          uint32_t temp;
+        // cache handling
+          if(inst_hit){ // the previous fetch was a hit
+ 		       temp = inst_attempt_update();
+          }
+          else{ // the previous fetch was a miss
+            // compute set & tag to compare to previous miss
+            uint64_t addr = CURRENT_STATE.PC;
+            addr = addr >> 5;
+            uint tmp_set_index = addr & 0x3F;
+            addr = addr >> 6;
+            uint tmp_tag = addr;
+
+            if(tmp_set_index == set_index && tmp_tag == tag){
+              // if the tags and sets are the same, handle the miss
+              temp = inst_handle_miss(inst_cache, CURRENT_STATE.PC);
+            }
+            else{
+              // if the tags and set indices aren't the same, fetch again
+              temp = inst_attempt_update();
+            }
+          }
+
+        if(inst_hit){
+		      //printf("%08x \n", temp);
+		      IFtoID.instruction = temp;
+          //printf("incrementing PC...\n");
+          //CURRENT_STATE.PC += 4;
+          IFtoID.PC = CURRENT_STATE.PC;
+          bp_predict(CURRENT_STATE.PC);
+          IFtoID.target = CURRENT_STATE.PC;
+
+		      //printf("ID unFLUSHed\n");
+		      ID_FLUSH = false;
+        }
+
       }
       else{
         TMP_STALL_IF = false;
-
-        if(EXtoMEM.branch)
-          IF_bubble();
-        else
-          ID_STALL = false;
-
+        IF_bubble();
       }
-
 	  }
 	  else{
 		  IF_bubble();
@@ -1359,8 +1414,26 @@ void pipe_stage_fetch()
 void pipe_cycle()
 {
 	pipe_stage_wb();
-	pipe_stage_mem();
-	pipe_stage_execute();
+
+  if(data_cycles == 0){
+    MEM_FLUSH = false;
+    EX_STALL = false;
+    ID_STALL = false;
+    IF_STALL = false;
+  }
+
+  pipe_stage_mem();
+  pipe_stage_execute();
 	pipe_stage_decode();
-	pipe_stage_fetch();
+
+  if(inst_cycles == 0)
+    IF_FLUSH = false;
+
+  pipe_stage_fetch();
+
+  if(inst_cycles > 0)
+    inst_cycles--;
+
+  if(data_cycles > 0)
+    data_cycles--;
 }

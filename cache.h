@@ -42,8 +42,15 @@ typedef struct
   set* sets;
 } cache_t;
 
+extern int inst_hit;
+extern int inst_empty;
+extern int data_hit;
+extern int data_empty;
+
 cache_t *cache_new(int sets, int ways, int block);
 void cache_destroy(cache_t *c);
+uint32_t inst_handle_miss(cache_t *c, uint64_t addr);
+uint64_t data_handle_miss(cache_t *c, uint64_t addr, int type, int size, uint64_t val);
 uint32_t inst_cache_update(cache_t *c, uint64_t addr);
 // type == 0 -> store, type == 1 -> load.
 uint64_t data_cache_update(cache_t *c, uint64_t addr, int type, int size, uint64_t val);

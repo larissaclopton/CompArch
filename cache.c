@@ -15,8 +15,11 @@
 #include <stdlib.h>
 #include <assert.h>
 
-int inst_hit;
-int data_hit;
+int inst_hit = 1;
+int inst_empty;
+
+int data_hit = 1;
+int data_empty;
 
 void free_queue(queue *q){
 
@@ -37,6 +40,7 @@ int LRU_index(queue *q) {
   q->head = q->head->next;
   tmp->next = NULL;
   q->tail->next = tmp;
+  q->tail = tmp;
   return tmp->index;
 
 }
@@ -50,6 +54,7 @@ void enqueue(queue *q, int index) {
     q->head = new_node;
     q->tail = new_node;
   } else {
+    // NOTE: what if head == tail?
     q->tail->next = new_node;
     q->tail = new_node;
   }
@@ -153,18 +158,49 @@ void fill_block(uint8_t *block, uint64_t addr){
   }
 }
 
+uint32_t inst_handle_miss(cache_t *c, uint64_t addr){
+
+  uint64_t tmp = addr;
+  uint mask = 0x3F;
+  tmp = tmp >> 5;
+  uint set_index = tmp & mask;
+  tmp = tmp >> 6;
+  unsigned long long tag = tmp;
+
+  set *c_set = &c->sets[set_index];
+
+  // Cache miss, open slot
+  uint32_t inst = mem_read_32(addr);
+  if(inst_empty != -1){
+    fill_block(c_set->lines[inst_empty].block, addr);
+    c_set->lines[inst_empty].valid = 1;
+    c_set->lines[inst_empty].tag = tag;
+    enqueue(c_set->lru, inst_empty);
+  }
+  // Cache miss, full cache
+  else{
+    int idx = LRU_index(c_set->lru);
+    fill_block(c_set->lines[idx].block, addr);
+    c_set->lines[idx].tag = tag;
+ }
+
+  inst_hit = 1;
+  return inst;
+}
+
 uint32_t inst_cache_update(cache_t *c, uint64_t addr){
-  // if -1, there are no empty lines
-  int empty = -1;
   // initialize to miss
   inst_hit = 0;
 
-  int tmp = addr;
-  uint mask = 0x1F;
-  uint offset = tmp & mask;
+  // if -1, there are no empty lines
+  inst_empty = -1;
+
+  uint32_t inst = 0;
+  uint64_t tmp = addr;
+  uint offset = tmp & 0x1F;
   tmp = tmp >> 5;
-  uint set_index = tmp & mask;
-  tmp = tmp >> 5;
+  uint set_index = tmp & 0x3f;
+  tmp = tmp >> 6;
   unsigned long long tag = tmp;
 
   set *c_set = &c->sets[set_index];
@@ -174,9 +210,6 @@ uint32_t inst_cache_update(cache_t *c, uint64_t addr){
   for(i = 0; i < num_lines; i++){
     // Cache hit
     if(c_set->lines[i].tag == tag){
-      inst_hit = 1;
-
-      uint32_t inst = 0;
       for(j = offset+3; j >= offset; j--){
         inst = inst << 8;
         inst = inst | c_set->lines[i].block[j];
@@ -186,27 +219,11 @@ uint32_t inst_cache_update(cache_t *c, uint64_t addr){
 
       return inst;
     }
-    else if( (empty == -1) && (!c_set->lines[i].valid) )
-      empty = i;
-  }
+    else if( (inst_empty == -1) && (!c_set->lines[i].valid) )
+      inst_empty = i;
+    }
 
-  // Cache miss, open slot
-  uint32_t inst = mem_read_32(addr);
-  if(empty != -1){
-    fill_block(c_set->lines[empty].block, addr);
-    c_set->lines[empty].valid = 1;
-    c_set->lines[empty].tag = tag;
-    enqueue(c_set->lru, empty);
-
-    return inst;
-  }
-  // Cache miss, full cache
-  else{
-    int idx = LRU_index(c_set->lru);
-    fill_block(c_set->lines[idx].block, addr);
-    c_set->lines[idx].tag = tag;
-
-  }
+  return inst;
 }
 
 uint64_t get_data(set *c_set, int index, int offset, int size){
@@ -233,9 +250,12 @@ uint64_t store_data(set *c_set, int index, int offset, int size, uint64_t val){
   return data;
 }
 
-void write_back(uint8_t *block, uint64_t addr){
+void write_back(line line, int idx){
+  uint64_t tmp_addr = line.tag;
+  tmp_addr = (tmp_addr << 8) | (uint)idx;
+  tmp_addr = tmp_addr << 5;
+
   int i, j;
-  uint64_t tmp_addr = addr & 0xFFFFFFFFFFFFFFE0;
   uint mask = 0xFF;
   uint32_t chunk;
   for(i = 0; i < 32; i += 4){
@@ -243,20 +263,74 @@ void write_back(uint8_t *block, uint64_t addr){
 
     for(j = i+3; j >= i; j--){
       chunk = chunk << 8;
-      chunk = chunk | block[j];
+      chunk = chunk | line.block[j];
     }
 
     mem_write_32(tmp_addr + i, chunk);
   }
 }
 
+
+uint64_t data_handle_miss(cache_t *c, uint64_t addr, int type, int size, uint64_t val){
+  uint64_t data = 0;
+
+  uint64_t tmp = addr;
+  uint mask5 = 0x1F;
+  uint mask8 = 0xFF;
+  uint offset = tmp & mask5;
+  tmp = tmp >> 5;
+  uint set_index = tmp & mask8;
+  tmp = tmp >> 8;
+  unsigned long long tag = tmp;
+
+  set *c_set = &c->sets[set_index];
+
+  // Cache miss, empty slot
+  if(data_empty != -1){
+    fill_block(c_set->lines[data_empty].block, addr);
+    c_set->lines[data_empty].valid = 1;
+    c_set->lines[data_empty].tag = tag;
+
+    // Load
+    if(type == 1){
+      data = get_data(c_set, data_empty, offset, size);
+    }
+    // Store
+    else{
+      data = store_data(c_set, data_empty, offset, size, val);
+    }
+
+    enqueue(c_set->lru, data_empty);
+  }
+  // Cache miss, full cache
+  else{
+    int idx = LRU_index(c_set->lru);
+    // write-back on eviction
+    write_back(c_set->lines[idx], idx);
+    fill_block(c_set->lines[idx].block, addr);
+    c_set->lines[idx].tag = tag;
+
+    // Load
+    if(type == 1){
+      data = get_data(c_set, idx, offset, size);
+    }
+    // Store
+    else{
+      data = store_data(c_set, idx, offset, size, val);
+    }
+  }
+
+  data_hit = 1;
+  return data;
+}
+
 uint64_t data_cache_update(cache_t *c, uint64_t addr, int type, int size, uint64_t val){
   // if -1, there are no empty lines
-  int empty = -1;
+  data_empty = -1;
   // initialize to miss
   data_hit = 0;
 
-  int tmp = addr;
+  uint64_t tmp = addr;
   uint mask5 = 0x1F;
   uint mask8 = 0xFF;
   uint offset = tmp & mask5;
@@ -268,7 +342,7 @@ uint64_t data_cache_update(cache_t *c, uint64_t addr, int type, int size, uint64
   set *c_set = &c->sets[set_index];
   int num_lines = sizeof(c_set->lines) / sizeof(c_set->lines[0]);
 
-  uint64_t data;
+  uint64_t data = 0;
   int i, j;
   for(i = 0; i < num_lines; i++){
     // Cache hit
@@ -287,45 +361,9 @@ uint64_t data_cache_update(cache_t *c, uint64_t addr, int type, int size, uint64
       shift(c_set->lru, i);
       return data;
     }
-    else if( (empty == -1) && (!c_set->lines[i].valid) )
-      empty = i;
+    else if( (data_empty == -1) && (!c_set->lines[i].valid) )
+      data_empty = i;
   }
 
-  // Cache miss, empty slot
-  if(empty != -1){
-    fill_block(c_set->lines[empty].block, addr);
-    c_set->lines[empty].valid = 1;
-    c_set->lines[empty].tag = tag;
-
-    // Load
-    if(type == 1){
-      data = get_data(c_set, i, offset, size);
-    }
-    // Store
-    else{
-      data = store_data(c_set, i, offset, size, val);
-    }
-
-    enqueue(c_set->lru, empty);
-    return data;
-  }
-  // Cache miss, full cache
-  else{
-    int idx = LRU_index(c_set->lru);
-    // write-back on eviction
-    write_back(c_set->lines[idx].block, addr);
-    fill_block(c_set->lines[idx].block, addr);
-    c_set->lines[idx].tag = tag;
-
-    // Load
-    if(type == 1){
-      data = get_data(c_set, i, offset, size);
-    }
-    // Store
-    else{
-      data = store_data(c_set, i, offset, size, val);
-    }
-
-    return data;
-  }
+  return data;
 }

@@ -7,6 +7,15 @@
 #ifndef _BP_H_
 #define _BP_H_
 
+#include "shell.h"
+#include "stdbool.h"
+#include "bp.h"
+#include <limits.h>
+#include "pipe.h"
+#include <stdlib.h>
+#include <stdio.h>
+#include <assert.h>
+
 typedef struct{
   uint8_t ghr;
   int PHT[256];
@@ -23,7 +32,7 @@ typedef struct{
   /* gshare */
   gshare gs;
   /* BTB */
-  BTB_entry btb[1024]
+  BTB_entry btb[1024];
 } bp_t;
 
 

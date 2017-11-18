@@ -1,49 +1,36 @@
 /*
  * ARM pipeline timing simulator
  *
- * CMSC 22200, Fall 2016
- * Gushu Li and Reza Jokar
+ * CMSC 22200
  */
+
+// NOTE: Team Members
+// Larissa Clopton cloptla
+// Nathan Chortek       nchortek
 
 #include "bp.h"
 #include "pipe.h"
 #include "shell.h"
 #include <stdlib.h>
 #include <stdio.h>
-
-// typedef struct{
-//   uint8_t ghr;
-//   int PHT[256];
-// } gshare;
-//
-// typedef struct{
-//   uint64_t addr;
-//   uint64_t target;
-//   int valid;
-//   int br_type;
-// } BTB_entry;
-//
-// typedef struct{
-//   /* gshare */
-//   gshare gs;
-//   /* BTB */
-//   BTB_entry btb[1024]
-// } bp_t;
+#include <assert.h>
 
 
 static bp_t predictor;
 
 void bp_initialize(){
-  int PHT[256] = {0};
-  gshare gs = {0, PHT};
-  predictor.gs = gs;
-
   int i;
+
+  gshare gs;
+  gs.ghr = 0;
+  for(i = 0; i < 256; i++)
+    gs.PHT[i] = 0;
+
+  predictor.gs = gs;
   for(i = 0; i < 1024; i++){
     BTB_entry tmp = {0, 0, 0, 0};
     predictor.btb[i] = tmp;
   }
-
 }
 
 void bp_predict(uint64_t PC)
@@ -55,14 +42,21 @@ void bp_predict(uint64_t PC)
 
     if(predictor.btb[btb_index].addr == PC){
       if(predictor.btb[btb_index].valid){
-        if(!predictor.btb[btb_index].br_type || predictor.gs.PHT[pht_index] >= 2)
+        if(!predictor.btb[btb_index].br_type || predictor.gs.PHT[pht_index] >= 2){
           CURRENT_STATE.PC  = predictor.btb[btb_index].target;
+          IFtoID.prediction = 1;
+          return;
+        }
+        else
+          CURRENT_STATE.PC += 4;
       }
       else
         CURRENT_STATE.PC += 4;
     }
     else
       CURRENT_STATE.PC += 4;
+
+    IFtoID.prediction = 0;
 }
 
 void bp_update(uint64_t PC, uint64_t target, uint taken, int br_type)
