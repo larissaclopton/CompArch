@@ -6,8 +6,14 @@
  */
 
 #include "cache.h"
-#include <stdlib.h>
+#include "bp.h"
+#include "pipe.h"
+#include "cache.h"
+#include "shell.h"
 #include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <assert.h>
 
 int inst_hit;
 int data_hit;
@@ -73,9 +79,7 @@ void shift(queue *q, int index) {
     q->tail->next = tmp;
     q->tail = tmp;
   }
-
 }
-
 
 // create block & initialize values
 line create_line(int block){
