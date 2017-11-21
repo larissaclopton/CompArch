@@ -28,8 +28,25 @@ uint set_index;
 uint tag;
 
 // cache stall counters
-uint inst_cycles = 0;
-uint data_cycles = 0;
+int inst_cycles = -1;
+int data_cycles = -1;
+
+int MEM_FULL = 0;
+int EX_FULL = 0;
+int ID_FULL = 0;
+
+bool temp_HALT_FLAG;
+int temp_FLAG_Z;
+int temp_FLAG_N;
+int64_t temp_result;
+int temp_dest_register;
+uint64_t temp_mem_address;
+int temp_nbits; // for STURx and LDURx
+bool temp_branch;
+bool temp_mem_read;
+bool temp_mem_write;
+bool temp_reg_write;
+bool temp_mem_to_reg;
 
 void pipe_init()
 {
@@ -73,6 +90,7 @@ void IF_bubble(){
   IFtoID.prediction = -1;
 	ID_FLUSH = true;
  	//printf("IF bubble\n");
+  ID_FULL = 0;
 }
 
 void ID_bubble(){
@@ -87,11 +105,13 @@ void ID_bubble(){
     IFtoID.prediction = -1;
   	//printf("ID bubble\n");
   	EX_FLUSH = true;
+    EX_FULL = 0;
 }
 
 void EX_bubble(){
     EXtoMEM.result = 0;
     EXtoMEM.dest_register = 0;
+    //printf("replacing mem_address %08lx with 0\n", EXtoMEM.mem_address);
     EXtoMEM.mem_address = 0;
     EXtoMEM.nbits = 0; // for STURx and LDURx
     EXtoMEM.branch = false;
@@ -101,6 +121,7 @@ void EX_bubble(){
  	EXtoMEM.mem_to_reg = false;
 	//printf("EX bubble\n");
 	MEM_FLUSH = true;
+  MEM_FULL = 0;
 }
 
 void MEM_bubble(){
@@ -531,11 +552,14 @@ void STURx(int nbits, int fields[]){
 	EXtoMEM.mem_to_reg = false;
 	EXtoMEM.mem_address = start_addr;
 	EXtoMEM.result = result;
+  //printf("In STURx...\n");
+  //printf("EXtoMEM.result = %ld\n", EXtoMEM.result);
 	EXtoMEM.nbits = nbits;
 
 }
 
 void LDURx(int nbits, int fields[]){
+  //printf("LDURx!\n");
 	//printf("executing LDUR\n");
 
 	int regs[] = {fields[3]};
@@ -848,14 +872,6 @@ void execute(char instr_type, int fields[])
   //int branch_reg = 0;
   switch (instr_type){
     case 'R': {
-      //printf("case R\n");
-		//EXtoMEM.mem_address = 0;
-		//EXtoMEM.nbits = 0;
-		//EXtoMEM.branch = false; //NOTE: will need to be reset in BR
-		//EXtoMEM.mem_read = false;
-		//EXtoMEM.mem_write = false;
-		//EXtoMEM.reg_write = true; //NOTE: will need to be reset in BR
-		//EXtoMEM.mem_to_reg = false;
       switch(fields[0]) {
 
               case 0x459: // ADD extended format treated as ADD
@@ -899,14 +915,6 @@ void execute(char instr_type, int fields[])
 
     } break;
     case 'I': {
-      //printf("case I\n");
-		//EXtoMEM.mem_address = 0;
-		//EXtoMEM.nbits = 0;
-		//EXtoMEM.branch = false;
-		//EXtoMEM.mem_read = false;
-		//EXtoMEM.mem_write = false;
-		//EXtoMEM.reg_write = true;
-		//EXtoMEM.mem_to_reg = false;
       switch(fields[0]) {
 
         case 0x244: { // ADDI
@@ -935,6 +943,7 @@ void execute(char instr_type, int fields[])
       //NEXT_STATE.PC = CURRENT_STATE.PC + 4;
     } break;
     case 'D': {
+      //printf("case D\n");
       switch(fields[0]) {
 
         case 0x7C0: { // STUR
@@ -967,13 +976,6 @@ void execute(char instr_type, int fields[])
       //NEXT_STATE.PC = CURRENT_STATE.PC + 4;
     } break;
     case 'C': {
-		// EXtoMEM.result = 0;
-		// EXtoMEM.dest_register = 0;
-		// EXtoMEM.mem_address = 0;
-		// EXtoMEM.mem_read = false;
-		// EXtoMEM.mem_write = false;
-		// EXtoMEM.reg_write = false;
-		// EXtoMEM.mem_to_reg = false;
       switch (fields[0]) {
         case 0xB5: { //CBNZ
           CBNZ(fields);
@@ -988,14 +990,6 @@ void execute(char instr_type, int fields[])
       }
     } break;
     case 'B': {
-		// EXtoMEM.branch = true;
-		// EXtoMEM.result = 0;
-		// EXtoMEM.dest_register = 0;
-		// EXtoMEM.mem_address = 0;
-		// EXtoMEM.mem_read = false;
-		// EXtoMEM.mem_write = false;
-		// EXtoMEM.reg_write = false;
-		// EXtoMEM.mem_to_reg = false;
       //call function (immediate branching)
       //printf("immediate branching...\n");
       BRANCH_IMM(fields);
@@ -1079,10 +1073,6 @@ void I_decoder(int instruct_no)
 		IDtoEX.fields4 = Rd;
    	IDtoEX.fields5 = 0;
 
-		//int i;
-		//for(i = 0; i < 4; i++){
-    //     	printf("%08x \n", fields[i]);
-     //	}
 	}
 
  	IDtoEX.instr_type = 'I';
@@ -1205,7 +1195,7 @@ void decode(int instruct_no)
     	return;
 	}
 
-	//printf("ERROR: Unrecognized Command.\n");
+	printf("ERROR: Unrecognized Command.\n");
 	RUN_BIT = 0;
 }
 
@@ -1214,11 +1204,23 @@ void decode(int instruct_no)
 
 void pipe_stage_wb()
 {
+  // printf("\n\n---------------------\n\n");
+  // printf("Cycle: %d\n", stat_cycles + 1);
+	// printf("MEMtoWB.result = %ld\n", MEMtoWB.result);
+  // printf("MEMtoWB.dest_register = %d\n", MEMtoWB.dest_register);
+	// printf("MEMtoWB.reg_write: %d\n", MEMtoWB.reg_write);
+  // printf("MEMtoWB.mem_to_reg: %d\n", MEMtoWB.mem_to_reg);
+  // printf("\n---------------------\n\n");
+
   if(!WB_STALL){
 	  if(!WB_FLUSH){
 		  //printf("retiring instruction...\n");
 		  stat_inst_retire++;
 		  if(MEMtoWB.HALT_FLAG){
+          //printf("destroying inst cache...\n");
+          cache_destroy(inst_cache, 64, 4);
+          //printf("destroy data cache...\n");
+          cache_destroy(data_cache, 256, 8);
 			   RUN_BIT = 0;
 			   return;
 		  }
@@ -1239,15 +1241,25 @@ void pipe_stage_wb()
 }
 
 int64_t data_attempt_update(uint64_t addr, int type, int size, uint64_t val){
+  //printf("attempting data update for type %d\n", type);
   uint64_t temp = data_cache_update(data_cache, addr, type, size, val);
 
   if(!data_hit){
    data_cycles = 50;
    MEM_bubble();
-   MEM_FLUSH = true;
-   IF_STALL = false;
-   ID_STALL = false;
-   EX_STALL = false;
+   //MEM_FLUSH = true;
+   MEM_STALL = true;
+
+   temp_mem_address = EXtoMEM.mem_address;
+   temp_mem_read = EXtoMEM.mem_read;
+   temp_nbits = EXtoMEM.nbits;
+   temp_result = EXtoMEM.result;
+   temp_HALT_FLAG = EXtoMEM.HALT_FLAG;
+   temp_FLAG_Z = EXtoMEM.FLAG_Z;
+   temp_FLAG_N = EXtoMEM.FLAG_N;
+   temp_dest_register = EXtoMEM.dest_register;
+   temp_reg_write = EXtoMEM.reg_write;
+   temp_mem_to_reg = EXtoMEM.mem_to_reg;
   }
 
   return (int64_t)temp;
@@ -1258,6 +1270,7 @@ void passToWB(){
   MEMtoWB.FLAG_Z = EXtoMEM.FLAG_Z;
   MEMtoWB.FLAG_N = EXtoMEM.FLAG_N;
   MEMtoWB.result = EXtoMEM.result;
+  //printf("passToWB setting MEMtoWB.result = %ld\n", EXtoMEM.result);
   MEMtoWB.dest_register = EXtoMEM.dest_register;
   MEMtoWB.reg_write = EXtoMEM.reg_write;
   MEMtoWB.mem_to_reg = EXtoMEM.mem_to_reg;
@@ -1267,62 +1280,138 @@ void passToWB(){
 
 void pipe_stage_mem()
 {
+  //printf("Cycle: %d\n", stat_cycles+1);
+
+  if(data_cycles > 0){
+    //MEM_STALL = true;
+    MEM_bubble();
+  }
+
+  if(data_cycles == 1){
+    printf("dcache fill at cycle %d\n", stat_cycles + 1);
+    data_handle_miss(data_cache, temp_mem_address);
+  }
+
+
+  if(data_cycles == 0){
+    //MEM_FLUSH = false;
+    MEM_STALL = false;
+  }
+
+
   if(!MEM_STALL){
+    //printf("MEM not stalled\n");
 	  if(!MEM_FLUSH){
+      //printf("MEM not flushed\n");
 
+      int64_t temp;
+      if (data_cycles == 0) {
+        temp = data_attempt_update(temp_mem_address, temp_mem_read,
+                                   temp_nbits/8, temp_result);
 
-      if(EXtoMEM.mem_read || EXtoMEM.mem_write){
-        int64_t temp;
-        if(data_hit){ // the previous cache look-up was a hit
+        MEMtoWB.HALT_FLAG = temp_HALT_FLAG;
+        MEMtoWB.FLAG_Z = temp_FLAG_Z;
+        MEMtoWB.FLAG_N = temp_FLAG_Z;
+        MEMtoWB.dest_register = temp_dest_register;
+        MEMtoWB.reg_write = temp_reg_write;
+        MEMtoWB.mem_to_reg = temp_mem_to_reg;
+        MEMtoWB.result = temp;
+        //printf("data_cycles == 0 case...setting MEMtoWB.result = %ld\n", temp);
+
+        WB_FLUSH = false;
+      }
+      //printf("data cycles = 0\n");
+      // NOTE: need to store all previous values too
+      else {
+        if(EXtoMEM.mem_read || EXtoMEM.mem_write){
           temp = data_attempt_update(EXtoMEM.mem_address, EXtoMEM.mem_read,
                                      EXtoMEM.nbits/8, EXtoMEM.result);
-        }
-        else{ // the previous cache look-up was a miss
-          temp = data_handle_miss(data_cache, EXtoMEM.mem_address, EXtoMEM.mem_read,
-                                  EXtoMEM.nbits/8, EXtoMEM.result);
-        }
 
-        if(data_hit){
+          if(data_hit){
+            passToWB();
+
+        		if(EXtoMEM.mem_read){
+              //printf("normal case...setting MEMtoWB.result = %ld\n", temp);
+        		   MEMtoWB.result = temp;
+        		}
+          }
+        }
+        else{
           passToWB();
-
-    		  if(EXtoMEM.mem_read){
-    			   MEMtoWB.result = temp;
-    		  }
         }
       }
-      else{
-        passToWB();
-      }
-	  }
+    }
 	  else {
-	  	  MEM_bubble();
+	  	MEM_bubble();
 	  }
   }
 }
 
 void pipe_stage_execute()
 {
+
+  // if(MEM_FULL && data_cycles >=0){
+  //   //printf("MEM is full. Stalling EX\n");
+  //   EX_STALL = true;
+  // }
+
+  //printf("pipe stage execute... IDtoEX.PC = %08lx\n", IDtoEX.PC);
+
+  // if(EX_FULL && data_cycles >= 0){
+  //     ID_STALL = true;
+  // }
+
+
+  // printf("\n\n---------------------\n\n");
+  // printf("Cycle: %d\n", stat_cycles + 1);
+  // printf("EXtoMEM.result = %ld\n", EXtoMEM.result);
+  // printf("EXtoMEM.dest_register = %d\n", EXtoMEM.dest_register);
+  // printf("EXtoMEM.reg_write: %d\n", EXtoMEM.reg_write);
+  // printf("EXtoMEM.mem_to_reg: %d\n", EXtoMEM.mem_to_reg);
+  // printf("\n---------------------\n\n");
+
   if(!EX_STALL){
     if(!EX_FLUSH){
       EXtoMEM.HALT_FLAG = IDtoEX.HALT_FLAG;
       int fields[] = {IDtoEX.fields1, IDtoEX.fields2, IDtoEX.fields3, IDtoEX.fields4, IDtoEX.fields5};
+      //printf("calling execute...\n\n\n\n");
       execute(IDtoEX.instr_type, fields);
 
 	     if(!TMP_STALL_EX){
-	  	     //printf("MEM unFLUSHed\n");
+	  	     //printf("MEM_FULL = 1\n");
+           MEM_FULL = 1;
+           EX_FULL = 0;
       	   MEM_FLUSH = false;
 	     }
 	     else
 		      TMP_STALL_EX = false;
     }
     else{
-	  EX_bubble();
-	}
+	    EX_bubble();
+      //printf("EX bubble at cycle %d\n", stat_cycles +1);
+	  }
+  }
+
+  if(MEM_FULL && data_cycles >=0){
+    //printf("MEM is full. Stalling EX\n");
+    EX_STALL = true;
   }
 }
 
 void pipe_stage_decode()
 {
+
+  // if(EX_FULL && data_cycles >= 0){
+  // //if(ID_FULL && EX_STALL && data_cycles >= 0){
+  //   ID_STALL = true;
+  // }
+
+  //printf("ID PC: %08lx at cycle %d\n", IFtoID.PC, stat_cycles + 1);
+  //printf("ID instruction: %08x at cycle %d\n", IFtoID.instruction, stat_cycles + 1);
+  // if(ID_FULL && data_cycles >= 0){
+  //   IF_STALL = true;
+  // }
+
   if(!ID_STALL){
     if(!ID_FLUSH){
       IDtoEX.PC = IFtoID.PC;
@@ -1331,10 +1420,17 @@ void pipe_stage_decode()
       decode(IFtoID.instruction);
 	    //printf("EX unFLUSHed\n");
 	    EX_FLUSH = false;
+      EX_FULL = 1;
+      ID_FULL = 0;
 	  }
 	  else{
 		  ID_bubble();
 	  }
+  }
+
+  if(EX_FULL && data_cycles >= 0){
+  //if(ID_FULL && EX_STALL && data_cycles >= 0){
+    ID_STALL = true;
   }
 }
 
@@ -1348,10 +1444,15 @@ uint32_t inst_attempt_update(){
    addr = addr >> 6;
    tag = addr;
 
+   //printf("stalling for icache miss\n");
    inst_cycles = 50;
    IF_bubble();
    IF_FLUSH = true;
    temp = 0;
+  }
+  else{
+    //printf("IF had a hit in inst_attempt_update\n");
+    inst_cycles = -1;
   }
 
   return temp;
@@ -1359,35 +1460,64 @@ uint32_t inst_attempt_update(){
 
 void pipe_stage_fetch()
 {
+
+  // if(ID_FULL && data_cycles >= 0){
+  // //if(ID_STALL && data_cycles >= 0){
+  //   printf("ID_FULL && data_cycles >=0, stalling IF\n");
+  //   IF_STALL = true;
+  // }
+
+  //printf("icache at cycle %d\n", stat_cycles +1);
+
+  if(inst_cycles == 0){
+    IF_FLUSH = false;
+  }
+
+
+  if(inst_cycles == 1){
+    uint64_t addr = CURRENT_STATE.PC;
+    addr = addr >> 5;
+    uint tmp_set_index = addr & 0x3F;
+    addr = addr >> 6;
+    uint tmp_tag = addr;
+
+    if(tmp_set_index == set_index && tmp_tag == tag){
+      // if the tags and sets are the same, handle the miss
+      printf("icache fill at cycle %d\n", stat_cycles +1);
+      inst_handle_miss(inst_cache, CURRENT_STATE.PC);
+    }
+    else{ //NOTE: no idea if this is correct
+
+      // if the tags and set indices aren't the same, fetch again
+      //printf("bloop\n");
+      uint32_t temp = inst_attempt_update();
+      //printf("aiight\n");
+
+      if(inst_hit){
+        //printf("inst_hit branch problems, instruction: %08x \n", temp);
+        IFtoID.instruction = temp;
+        //printf("incrementing PC...\n");
+        //CURRENT_STATE.PC += 4;
+        IFtoID.PC = CURRENT_STATE.PC;
+        bp_predict(CURRENT_STATE.PC);
+        IFtoID.target = CURRENT_STATE.PC;
+
+        //printf("ID unFLUSHed\n");
+        ID_FLUSH = false;
+        ID_FULL = 1;
+      }
+    }
+  }
+
   if(!IF_STALL){
+    //printf("IF not stalled\n");
     if(!IF_FLUSH){
+      //printf("IF not flushed\n");
       if(!TMP_STALL_IF){
-
-          uint32_t temp;
-        // cache handling
-          if(inst_hit){ // the previous fetch was a hit
- 		       temp = inst_attempt_update();
-          }
-          else{ // the previous fetch was a miss
-            // compute set & tag to compare to previous miss
-            uint64_t addr = CURRENT_STATE.PC;
-            addr = addr >> 5;
-            uint tmp_set_index = addr & 0x3F;
-            addr = addr >> 6;
-            uint tmp_tag = addr;
-
-            if(tmp_set_index == set_index && tmp_tag == tag){
-              // if the tags and sets are the same, handle the miss
-              temp = inst_handle_miss(inst_cache, CURRENT_STATE.PC);
-            }
-            else{
-              // if the tags and set indices aren't the same, fetch again
-              temp = inst_attempt_update();
-            }
-          }
+        uint32_t temp = inst_attempt_update();
 
         if(inst_hit){
-		      //printf("%08x \n", temp);
+		      //printf("normal inst hit, instruction: %08x \n", temp);
 		      IFtoID.instruction = temp;
           //printf("incrementing PC...\n");
           //CURRENT_STATE.PC += 4;
@@ -1397,6 +1527,7 @@ void pipe_stage_fetch()
 
 		      //printf("ID unFLUSHed\n");
 		      ID_FLUSH = false;
+          ID_FULL = 1;
         }
 
       }
@@ -1409,31 +1540,59 @@ void pipe_stage_fetch()
 		  IF_bubble();
 	  }
   }
+
+  if(ID_FULL && data_cycles >= 0){
+  //if(ID_STALL && data_cycles >= 0){
+    printf("ID_FULL && data_cycles >=0, stalling IF\n");
+    IF_STALL = true;
+  }
 }
 
 void pipe_cycle()
 {
+  printf("Cycle #%d\n", stat_cycles + 1);
+  printf("MEM_FULL = %d\n", MEM_FULL);
+  printf("EX_FULL = %d\n", EX_FULL);
+  printf("ID_FULL = %d\n", ID_FULL);
+  // printf("MEM_STALL = %d\n", MEM_STALL);
+  // printf("EX_STALL = %d\n", EX_STALL);
+  // printf("ID_STALL = %d\n", ID_STALL);
+
 	pipe_stage_wb();
+  pipe_stage_mem();
+
+  // if(data_cycles > 0){
+  //    MEM_STALL = true;
+  //    //MEM_FLUSH = true;
+  //    //EX_STALL = true;
+  // }
+
+  //printf("previous EXtoMEM.mem_read = %d\n", EXtoMEM.mem_read);
+  pipe_stage_execute();
+  //printf("new EXtoMEM.mem_read = %d\n", EXtoMEM.mem_read);
+
+  //printf("ID_STALL = %d\n", ID_STALL);
+	pipe_stage_decode();
+  //printf("IF_STALL = %d\n", IF_STALL);
+  pipe_stage_fetch();
 
   if(data_cycles == 0){
-    MEM_FLUSH = false;
+    //MEM_FLUSH = false;
     EX_STALL = false;
     ID_STALL = false;
     IF_STALL = false;
+
+    data_cycles = -1;
   }
 
-  pipe_stage_mem();
-  pipe_stage_execute();
-	pipe_stage_decode();
 
-  if(inst_cycles == 0)
-    IF_FLUSH = false;
-
-  pipe_stage_fetch();
-
-  if(inst_cycles > 0)
-    inst_cycles--;
-
-  if(data_cycles > 0)
+  if(data_cycles > 0){
+    printf("dcache stall [%d] at cycle %d\n", data_cycles, stat_cycles + 1);
     data_cycles--;
+  }
+
+  if(inst_cycles > 0){
+    printf("icache bubble [%d] at cycle %d\n", inst_cycles, stat_cycles + 1);
+    inst_cycles--;
+  }
 }

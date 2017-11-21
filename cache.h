@@ -27,7 +27,7 @@ typedef struct{
 
 typedef struct{
         unsigned int valid;
-        unsigned long tag;
+        unsigned long long tag;
         uint8_t *block;
 }line;
 
@@ -48,9 +48,9 @@ extern int data_hit;
 extern int data_empty;
 
 cache_t *cache_new(int sets, int ways, int block);
-void cache_destroy(cache_t *c);
-uint32_t inst_handle_miss(cache_t *c, uint64_t addr);
-uint64_t data_handle_miss(cache_t *c, uint64_t addr, int type, int size, uint64_t val);
+void cache_destroy(cache_t *c, int num_sets, int ways);
+void inst_handle_miss(cache_t *c, uint64_t addr);
+void data_handle_miss(cache_t *c, uint64_t addr);
 uint32_t inst_cache_update(cache_t *c, uint64_t addr);
 // type == 0 -> store, type == 1 -> load.
 uint64_t data_cache_update(cache_t *c, uint64_t addr, int type, int size, uint64_t val);
