@@ -26,6 +26,7 @@ cache_t *inst_cache;
 // variables used for instruction cache control flow
 uint set_index;
 uint tag;
+uint abort_stall = 0;
 
 // cache stall counters
 int inst_cycles = -1;
@@ -166,23 +167,28 @@ void branch_handle_miss(){
   addr = addr >> 6;
   uint tmp_tag = addr;
 
-  if(tmp_set_index != set_index && tmp_tag != tag){
-    // if the tags and set indices aren't the same, fetch again
-    uint32_t temp = inst_attempt_update();
+  if(tmp_set_index != set_index || tmp_tag != tag){
+    printf("abort!\n");
+    // NOTE: set abort flag, don't run code below
+    abort_stall = 1;
 
-    if(inst_hit){
-      //printf("inst_hit branch problems, instruction: %08x \n", temp);
-      IFtoID.instruction = temp;
-      //printf("incrementing PC...\n");
-      //CURRENT_STATE.PC += 4;
-      IFtoID.PC = CURRENT_STATE.PC;
-      bp_predict(CURRENT_STATE.PC);
-      IFtoID.target = CURRENT_STATE.PC;
 
-      //printf("ID unFLUSHed\n");
-      ID_FLUSH = false;
-      ID_FULL = 1;
-    }
+    // // if the tags and set indices aren't the same, fetch again
+    // uint32_t temp = inst_attempt_update();
+    //
+    // if(inst_hit){
+    //   //printf("inst_hit branch problems, instruction: %08x \n", temp);
+    //   IFtoID.instruction = temp;
+    //   //printf("incrementing PC...\n");
+    //   //CURRENT_STATE.PC += 4;
+    //   IFtoID.PC = CURRENT_STATE.PC;
+    //   bp_predict(CURRENT_STATE.PC);
+    //   IFtoID.target = CURRENT_STATE.PC;
+    //
+    //   //printf("ID unFLUSHed\n");
+    //   ID_FLUSH = false;
+    //   ID_FULL = 1;
+    // }
   }
   else{
     TMP_STALL_IF = false;
@@ -1643,6 +1649,16 @@ void pipe_stage_fetch()
     printf("ID_FULL && data_cycles >=0, stalling IF\n");
     IF_STALL = true;
   }
+
+  //NOTE: abort
+  if(abort_stall){
+    IF_FLUSH = false;
+    TMP_STALL_IF = false;
+    inst_cycles = -1;
+    abort_stall = 0;
+  }
+
+
 }
 
 void pipe_cycle()
