@@ -110,17 +110,17 @@ void ID_bubble(){
 }
 
 void EX_bubble(){
-    EXtoMEM.result = 0;
-    EXtoMEM.dest_register = 0;
-    //printf("replacing mem_address %08lx with 0\n", EXtoMEM.mem_address);
-    EXtoMEM.mem_address = 0;
-    EXtoMEM.nbits = 0; // for STURx and LDURx
-    EXtoMEM.branch = false;
+  EXtoMEM.result = 0;
+  EXtoMEM.dest_register = 0;
+  //printf("replacing mem_address %08lx with 0\n", EXtoMEM.mem_address);
+  EXtoMEM.mem_address = 0;
+  EXtoMEM.nbits = 0; // for STURx and LDURx
+  EXtoMEM.branch = false;
  	EXtoMEM.mem_read = false;
  	EXtoMEM.mem_write = false;
  	EXtoMEM.reg_write = false;
  	EXtoMEM.mem_to_reg = false;
-	//printf("EX bubble\n");
+	printf("EX bubble\n");
 	MEM_FLUSH = true;
   MEM_FULL = 0;
 }
@@ -168,6 +168,7 @@ void branch_handle_miss(){
   uint tmp_tag = addr;
 
   if(tmp_set_index != set_index || tmp_tag != tag){
+    printf("icache bubble [%d] at cycle %d\n", inst_cycles, stat_cycles + 1);
     printf("abort!\n");
     // NOTE: set abort flag, don't run code below
     abort_stall = 1;
@@ -869,10 +870,10 @@ void B_COND(int fields[]){
 
 	if(branch){
 		EXtoMEM.branch = true;
-		printf("branching...\n");
+		//printf("branching...\n");
     if(IDtoEX.target != IDtoEX.PC + addr || IDtoEX.prediction != 1){
       //misprediction handling
-      printf("misprediction... predicted: %16lx ... actual: %16lx\n", IDtoEX.target, IDtoEX.PC + addr);
+      //printf("misprediction... predicted: %16lx ... actual: %16lx\n", IDtoEX.target, IDtoEX.PC + addr);
       ID_FLUSH = true;
       TMP_STALL_IF = true;
       CURRENT_STATE.PC = IDtoEX.PC + addr;
@@ -885,10 +886,10 @@ void B_COND(int fields[]){
 
 	}
 	else{
-		printf("not branching...\n");
+		//printf("not branching...\n");
     if(IDtoEX.target != IDtoEX.PC + 4 || IDtoEX.prediction != 0){
       //misprediction handling
-      printf("misprediction... predicted: %16lx ... actual: %16lx\n", IDtoEX.target, IDtoEX.PC + 4);
+      //printf("misprediction... predicted: %16lx ... actual: %16lx\n", IDtoEX.target, IDtoEX.PC + 4);
       ID_FLUSH = true;
       TMP_STALL_IF = true;
       CURRENT_STATE.PC = IDtoEX.PC + 4;
@@ -1335,7 +1336,7 @@ void pipe_stage_wb()
 }
 
 int64_t data_attempt_update(uint64_t addr, int type, int size, uint64_t val){
-  //printf("attempting data update for type %d\n", type);
+  printf("attempting data update for type %d\n", type);
   uint64_t temp = data_cache_update(data_cache, addr, type, size, val);
 
   if(!data_hit){
@@ -1376,6 +1377,7 @@ void passToWB(){
 void pipe_stage_mem()
 {
   //printf("Cycle: %d\n", stat_cycles+1);
+  printf("data_cycles = %d\n", data_cycles);
 
   if(data_cycles > 0){
     //MEM_STALL = true;
@@ -1389,18 +1391,19 @@ void pipe_stage_mem()
 
 
   if(data_cycles == 0){
-    //MEM_FLUSH = false;
+    MEM_FLUSH = false;
     MEM_STALL = false;
   }
 
 
   if(!MEM_STALL){
-    //printf("MEM not stalled\n");
+    printf("MEM not stalled\n");
 	  if(!MEM_FLUSH){
-      //printf("MEM not flushed\n");
+      printf("MEM not flushed\n");
 
       int64_t temp;
       if (data_cycles == 0) {
+        printf("data_cycles == 0, calling attemp_update\n");
         temp = data_attempt_update(temp_mem_address, temp_mem_read,
                                    temp_nbits/8, temp_result);
 
@@ -1419,6 +1422,7 @@ void pipe_stage_mem()
       // NOTE: need to store all previous values too
       else {
         if((EXtoMEM.mem_read || EXtoMEM.mem_write) && !EXtoMEM.HALT_FLAG){
+          printf("normal case... calling data attempt update\n");
           temp = data_attempt_update(EXtoMEM.mem_address, EXtoMEM.mem_read,
                                      EXtoMEM.nbits/8, EXtoMEM.result);
 
@@ -1611,11 +1615,11 @@ void pipe_stage_fetch()
   }
 
   if(!IF_STALL){
-    printf("IF not stalled\n");
+    //printf("IF not stalled\n");
     if(!IF_FLUSH){
-      printf("IF not flushed\n");
+      //printf("IF not flushed\n");
       if(!TMP_STALL_IF){
-        printf("IF not temp stalled...calling inst_attempt_update\n");
+        //printf("IF not temp stalled...calling inst_attempt_update\n");
         uint32_t temp = inst_attempt_update();
 
         if(inst_hit){
@@ -1646,7 +1650,7 @@ void pipe_stage_fetch()
   //if(ID_FULL && data_cycles >= 0){
   //if(ID_STALL && data_cycles >= 0){
   if(ID_FULL && ID_STALL && data_cycles >= 0) { // RECENT CHANGE
-    printf("ID_FULL && data_cycles >=0, stalling IF\n");
+    //printf("ID_FULL && data_cycles >=0, stalling IF\n");
     IF_STALL = true;
   }
 
