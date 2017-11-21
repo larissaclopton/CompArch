@@ -134,6 +134,62 @@ void MEM_bubble(){
 }
 
 
+uint32_t inst_attempt_update(){
+  uint32_t temp = inst_cache_update(inst_cache, CURRENT_STATE.PC);
+
+  if(!inst_hit){
+   uint64_t addr = CURRENT_STATE.PC;
+   addr = addr >> 5;
+   set_index = addr & 0x3F;
+   addr = addr >> 6;
+   tag = addr;
+
+   //printf("stalling for icache miss\n");
+   inst_cycles = 50;
+   IF_bubble();
+   IF_FLUSH = true;
+   temp = 0;
+  }
+  else{
+    //printf("IF had a hit in inst_attempt_update\n");
+    inst_cycles = -1;
+  }
+
+  return temp;
+}
+
+
+void branch_handle_miss(){
+  uint64_t addr = CURRENT_STATE.PC;
+  addr = addr >> 5;
+  uint tmp_set_index = addr & 0x3F;
+  addr = addr >> 6;
+  uint tmp_tag = addr;
+
+  if(tmp_set_index != set_index && tmp_tag != tag){
+    // if the tags and set indices aren't the same, fetch again
+    uint32_t temp = inst_attempt_update();
+
+    if(inst_hit){
+      //printf("inst_hit branch problems, instruction: %08x \n", temp);
+      IFtoID.instruction = temp;
+      //printf("incrementing PC...\n");
+      //CURRENT_STATE.PC += 4;
+      IFtoID.PC = CURRENT_STATE.PC;
+      bp_predict(CURRENT_STATE.PC);
+      IFtoID.target = CURRENT_STATE.PC;
+
+      //printf("ID unFLUSHed\n");
+      ID_FLUSH = false;
+      ID_FULL = 1;
+    }
+  }
+  else{
+    TMP_STALL_IF = false;
+  }
+}
+
+
 int64_t* forward(int regs[], int len){
   	int64_t *res = (int64_t*)malloc(len*sizeof(int64_t));
 	int stall = 0;
@@ -435,6 +491,10 @@ void BR(int fields[]){
     ID_FLUSH = true;
     TMP_STALL_IF = true;
     CURRENT_STATE.PC = tmp;
+
+    //NOTE: recent branch change
+    if(inst_cycles >=0)
+      branch_handle_miss();
   }
   bp_update(IDtoEX.PC, tmp, 1, 0);
 
@@ -602,6 +662,10 @@ void BRANCH_IMM(int fields[]){
     ID_FLUSH = true;
     TMP_STALL_IF = true;
     CURRENT_STATE.PC = IDtoEX.PC + addr;
+
+    //NOTE: recent branch change
+    if(inst_cycles >=0)
+      branch_handle_miss();
   }
   bp_update(IDtoEX.PC, IDtoEX.PC + addr, 1, 0);
 
@@ -649,6 +713,10 @@ void CBNZ(int fields[]){
       ID_FLUSH = true;
       TMP_STALL_IF = true;
       CURRENT_STATE.PC = IDtoEX.PC + addr;
+
+      //NOTE: recent branch change
+      if(inst_cycles >=0)
+        branch_handle_miss();
     }
     bp_update(IDtoEX.PC, IDtoEX.PC + addr, 1, 1);
 	}
@@ -660,6 +728,10 @@ void CBNZ(int fields[]){
       ID_FLUSH = true;
       TMP_STALL_IF = true;
       CURRENT_STATE.PC = IDtoEX.PC + 4;
+
+      //NOTE: recent branch change
+      if(inst_cycles >=0)
+        branch_handle_miss();
     }
     bp_update(IDtoEX.PC, IDtoEX.PC + 4, 0, 1);
 
@@ -710,6 +782,10 @@ void CBZ(int fields[]){
       ID_FLUSH = true;
       TMP_STALL_IF = true;
       CURRENT_STATE.PC = IDtoEX.PC + addr;
+
+      //NOTE: recent branch change
+      if(inst_cycles >=0)
+        branch_handle_miss();
     }
     bp_update(IDtoEX.PC, IDtoEX.PC + addr, 1, 1);
 	}
@@ -721,6 +797,10 @@ void CBZ(int fields[]){
       ID_FLUSH = true;
       TMP_STALL_IF = true;
       CURRENT_STATE.PC = IDtoEX.PC + 4;
+
+      //NOTE: recent branch change
+      if(inst_cycles >=0)
+        branch_handle_miss();
     }
     bp_update(IDtoEX.PC, IDtoEX.PC + 4, 0, 1);
 
@@ -783,25 +863,33 @@ void B_COND(int fields[]){
 
 	if(branch){
 		EXtoMEM.branch = true;
-		//printf("branching...\n");
+		printf("branching...\n");
     if(IDtoEX.target != IDtoEX.PC + addr || IDtoEX.prediction != 1){
       //misprediction handling
-      //printf("misprediction... predicted: %16lx ... actual: %16lx\n", IDtoEX.target, IDtoEX.PC + addr);
+      printf("misprediction... predicted: %16lx ... actual: %16lx\n", IDtoEX.target, IDtoEX.PC + addr);
       ID_FLUSH = true;
       TMP_STALL_IF = true;
       CURRENT_STATE.PC = IDtoEX.PC + addr;
+
+      //NOTE: recent branch change
+      if(inst_cycles >=0)
+        branch_handle_miss();
     }
     bp_update(IDtoEX.PC, IDtoEX.PC + addr, 1, 1);
 
 	}
 	else{
-		//printf("not branching...\n");
+		printf("not branching...\n");
     if(IDtoEX.target != IDtoEX.PC + 4 || IDtoEX.prediction != 0){
       //misprediction handling
-      //printf("misprediction... predicted: %16lx ... actual: %16lx\n", IDtoEX.target, IDtoEX.PC + 4);
+      printf("misprediction... predicted: %16lx ... actual: %16lx\n", IDtoEX.target, IDtoEX.PC + 4);
       ID_FLUSH = true;
       TMP_STALL_IF = true;
       CURRENT_STATE.PC = IDtoEX.PC + 4;
+
+      //NOTE: recent branch change
+      if(inst_cycles >=0)
+        branch_handle_miss();
     }
   	//CURRENT_STATE.PC = CURRENT_STATE.PC - 8 + addr;
     bp_update(IDtoEX.PC, IDtoEX.PC + 4, 0, 1);
@@ -1436,29 +1524,29 @@ void pipe_stage_decode()
   }
 }
 
-uint32_t inst_attempt_update(){
-  uint32_t temp = inst_cache_update(inst_cache, CURRENT_STATE.PC);
-
-  if(!inst_hit){
-   uint64_t addr = CURRENT_STATE.PC;
-   addr = addr >> 5;
-   set_index = addr & 0x3F;
-   addr = addr >> 6;
-   tag = addr;
-
-   //printf("stalling for icache miss\n");
-   inst_cycles = 50;
-   IF_bubble();
-   IF_FLUSH = true;
-   temp = 0;
-  }
-  else{
-    //printf("IF had a hit in inst_attempt_update\n");
-    inst_cycles = -1;
-  }
-
-  return temp;
-}
+// uint32_t inst_attempt_update(){
+//   uint32_t temp = inst_cache_update(inst_cache, CURRENT_STATE.PC);
+//
+//   if(!inst_hit){
+//    uint64_t addr = CURRENT_STATE.PC;
+//    addr = addr >> 5;
+//    set_index = addr & 0x3F;
+//    addr = addr >> 6;
+//    tag = addr;
+//
+//    //printf("stalling for icache miss\n");
+//    inst_cycles = 50;
+//    IF_bubble();
+//    IF_FLUSH = true;
+//    temp = 0;
+//   }
+//   else{
+//     //printf("IF had a hit in inst_attempt_update\n");
+//     inst_cycles = -1;
+//   }
+//
+//   return temp;
+// }
 
 void pipe_stage_fetch()
 {
@@ -1483,40 +1571,45 @@ void pipe_stage_fetch()
     addr = addr >> 6;
     uint tmp_tag = addr;
 
-    // NOTE: these checks happen elsewhere
-    if(tmp_set_index == set_index && tmp_tag == tag){
-      // if the tags and sets are the same, handle the miss
-      printf("icache fill at cycle %d\n", stat_cycles +1);
-      inst_handle_miss(inst_cache, CURRENT_STATE.PC);
-    }
-    else{ //NOTE: no idea if this is correct
+    // NOTE: recent branch change
+    printf("icache fill at cycle %d\n", stat_cycles +1);
+    inst_handle_miss(inst_cache, CURRENT_STATE.PC);
 
-      // if the tags and set indices aren't the same, fetch again
-      //printf("bloop\n");
-      uint32_t temp = inst_attempt_update();
-      //printf("aiight\n");
-
-      if(inst_hit){
-        //printf("inst_hit branch problems, instruction: %08x \n", temp);
-        IFtoID.instruction = temp;
-        //printf("incrementing PC...\n");
-        //CURRENT_STATE.PC += 4;
-        IFtoID.PC = CURRENT_STATE.PC;
-        bp_predict(CURRENT_STATE.PC);
-        IFtoID.target = CURRENT_STATE.PC;
-
-        //printf("ID unFLUSHed\n");
-        ID_FLUSH = false;
-        ID_FULL = 1;
-      }
-    }
+    // // NOTE: these checks happen elsewhere
+    // if(tmp_set_index == set_index && tmp_tag == tag){
+    //   // if the tags and sets are the same, handle the miss
+    //   printf("icache fill at cycle %d\n", stat_cycles +1);
+    //   inst_handle_miss(inst_cache, CURRENT_STATE.PC);
+    // }
+    // else{ //NOTE: no idea if this is correct
+    //
+    //   // if the tags and set indices aren't the same, fetch again
+    //   //printf("bloop\n");
+    //   uint32_t temp = inst_attempt_update();
+    //   //printf("aiight\n");
+    //
+    //   if(inst_hit){
+    //     //printf("inst_hit branch problems, instruction: %08x \n", temp);
+    //     IFtoID.instruction = temp;
+    //     //printf("incrementing PC...\n");
+    //     //CURRENT_STATE.PC += 4;
+    //     IFtoID.PC = CURRENT_STATE.PC;
+    //     bp_predict(CURRENT_STATE.PC);
+    //     IFtoID.target = CURRENT_STATE.PC;
+    //
+    //     //printf("ID unFLUSHed\n");
+    //     ID_FLUSH = false;
+    //     ID_FULL = 1;
+    //   }
+    // }
   }
 
   if(!IF_STALL){
-    //printf("IF not stalled\n");
+    printf("IF not stalled\n");
     if(!IF_FLUSH){
-      //printf("IF not flushed\n");
+      printf("IF not flushed\n");
       if(!TMP_STALL_IF){
+        printf("IF not temp stalled...calling inst_attempt_update\n");
         uint32_t temp = inst_attempt_update();
 
         if(inst_hit){

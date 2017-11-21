@@ -257,7 +257,7 @@ void inst_handle_miss(cache_t *c, uint64_t addr){
 }
 
 uint32_t inst_cache_update(cache_t *c, uint64_t addr){
-  //printf("accessing icache...\n");
+  printf("accessing icache...\n");
   // initialize to miss
   inst_hit = 0;
 
