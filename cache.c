@@ -28,9 +28,10 @@ void free_queue(queue *q){
   while(q->head != NULL){
     tmp = q->head;
     q->head = q->head->next;
+    //printf("freeing queue element\n");
     free(tmp);
   }
-
+  //printf("freeing queue pointer\n");
   free(q);
 }
 
@@ -139,12 +140,18 @@ void cache_destroy(cache_t *c, int num_sets, int ways)
 
   for(i = 0; i < num_sets; i++){
     for(j = 0; j < ways; j++){
+      //printf("freeing blocks\n");
       free(c->sets[i].lines[j].block);
     }
+    //printf("freeing lines\n");
     free(c->sets[i].lines);
+    //printf("freeing queue\n");
     free_queue(c->sets[i].lru);
   }
+  //printf("freeing sets\n");
   free(c->sets);
+//  printf("freeing cache\n");
+  free(c);
 }
 
 

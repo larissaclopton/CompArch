@@ -55,8 +55,8 @@ void pipe_init()
 
     bp_initialize();
 
-    data_cache = cache_new(64, 4, 32);
-    inst_cache = cache_new(256, 8, 32);
+    inst_cache = cache_new(64, 4, 32);
+    data_cache = cache_new(256, 8, 32);
 }
 
 Pipe_Reg_IFtoID IFtoID;
@@ -1217,9 +1217,9 @@ void pipe_stage_wb()
 		  //printf("retiring instruction...\n");
 		  stat_inst_retire++;
 		  if(MEMtoWB.HALT_FLAG){
-          //printf("destroying inst cache...\n");
+          printf("destroying inst cache...\n");
           cache_destroy(inst_cache, 64, 4);
-          //printf("destroy data cache...\n");
+          printf("destroy data cache...\n");
           cache_destroy(data_cache, 256, 8);
 			   RUN_BIT = 0;
 			   return;
@@ -1249,6 +1249,7 @@ int64_t data_attempt_update(uint64_t addr, int type, int size, uint64_t val){
    MEM_bubble();
    //MEM_FLUSH = true;
    MEM_STALL = true;
+   MEM_FULL = 0; // RECENT CHANGE
 
    temp_mem_address = EXtoMEM.mem_address;
    temp_mem_read = EXtoMEM.mem_read;
@@ -1274,7 +1275,7 @@ void passToWB(){
   MEMtoWB.dest_register = EXtoMEM.dest_register;
   MEMtoWB.reg_write = EXtoMEM.reg_write;
   MEMtoWB.mem_to_reg = EXtoMEM.mem_to_reg;
-
+  MEM_FULL = 0; // RECENT CHANGE
   WB_FLUSH = false;
 }
 
@@ -1323,7 +1324,7 @@ void pipe_stage_mem()
       //printf("data cycles = 0\n");
       // NOTE: need to store all previous values too
       else {
-        if(EXtoMEM.mem_read || EXtoMEM.mem_write){
+        if((EXtoMEM.mem_read || EXtoMEM.mem_write) && !EXtoMEM.HALT_FLAG){
           temp = data_attempt_update(EXtoMEM.mem_address, EXtoMEM.mem_read,
                                      EXtoMEM.nbits/8, EXtoMEM.result);
 
@@ -1392,7 +1393,8 @@ void pipe_stage_execute()
 	  }
   }
 
-  if(MEM_FULL && data_cycles >=0){
+  //if(MEM_FULL && data_cycles >=0){
+  if(MEM_FULL && MEM_STALL && data_cycles >= 0) { // RECENT CHANGE
     //printf("MEM is full. Stalling EX\n");
     EX_STALL = true;
   }
@@ -1428,8 +1430,8 @@ void pipe_stage_decode()
 	  }
   }
 
-  if(EX_FULL && data_cycles >= 0){
-  //if(ID_FULL && EX_STALL && data_cycles >= 0){
+  //if(EX_FULL && data_cycles >= 0){
+  if(EX_FULL && EX_STALL && data_cycles >= 0){ // RECENT CHANGE
     ID_STALL = true;
   }
 }
@@ -1481,6 +1483,7 @@ void pipe_stage_fetch()
     addr = addr >> 6;
     uint tmp_tag = addr;
 
+    // NOTE: these checks happen elsewhere
     if(tmp_set_index == set_index && tmp_tag == tag){
       // if the tags and sets are the same, handle the miss
       printf("icache fill at cycle %d\n", stat_cycles +1);
@@ -1541,8 +1544,9 @@ void pipe_stage_fetch()
 	  }
   }
 
-  if(ID_FULL && data_cycles >= 0){
+  //if(ID_FULL && data_cycles >= 0){
   //if(ID_STALL && data_cycles >= 0){
+  if(ID_FULL && ID_STALL && data_cycles >= 0) { // RECENT CHANGE
     printf("ID_FULL && data_cycles >=0, stalling IF\n");
     IF_STALL = true;
   }
